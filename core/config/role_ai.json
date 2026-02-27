@@ -8,11 +8,11 @@
     "model": "gpt-4o"
   },
   "devops": {
-    "provider": "anthropic",
-    "model": "claude-haiku-4-5-20251001"
+    "provider": "openai",
+    "model": "gpt-4o-mini"
   },
   "qa": {
-    "provider": "anthropic",
-    "model": "claude-haiku-4-5-20251001"
+    "provider": "openai",
+    "model": "gpt-4o-mini"
   }
 }
