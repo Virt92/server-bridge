@@ -14,5 +14,9 @@
   "qa": {
     "provider": "openai",
     "model": "gpt-4o-mini"
+  },
+  "designer": {
+    "provider": "openai",
+    "model": "gpt-4o"
   }
 }

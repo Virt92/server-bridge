@@ -65,9 +65,10 @@ ROLE_BRIEF = {
         "СТАНДАРТНЫЙ ДЕПЛОЙ NEXT.JS/NODE проекта (порядок важен):\n"
         "  Шаг 1 (discovery): ss -tlnp | grep PORT; PM2_HOME=/root/core/.pm2 pm2 list; ps aux | grep 'next\\|node' | grep PORT\n"
         "  Шаг 2: cd WORKDIR && npm run build  (собрать проект)\n"
-        "  Шаг 3: Убить старые процессы на порту PORT:\n"
-        "    kill $(lsof -ti:PORT) 2>/dev/null || true\n"
+        "  Шаг 3: Убить старые процессы на порту PORT (надёжный способ):\n"
+        "    fuser -k PORT/tcp 2>/dev/null || true\n"
         "    PM2_HOME=/root/core/.pm2 pm2 delete PROJECT_NAME 2>/dev/null || true\n"
+        "    sleep 1\n"
         "  Шаг 4: Запустить через PM2 с правильным портом:\n"
         "    PM2_HOME=/root/core/.pm2 PORT=PORT pm2 start npm --name 'PROJECT_NAME' --cwd WORKDIR -- start\n"
         "  Шаг 5: ufw allow PORT/tcp\n"
@@ -104,6 +105,33 @@ ROLE_BRIEF = {
         "  ✅/❌ UFW порт открыт\n"
         "  ✅/❌ Контент присутствует\n"
         "  VERDICT: PASS / FAIL + что нужно исправить"
+    ),
+    "designer": (
+        "Ты senior UI/UX Designer. Сервер: 91.99.201.99.\n"
+        "Специализация: дизайн-системы, цветовые палитры, типографика, компонентный UI, CSS.\n"
+        "Discovery-приоритеты: прочитай существующие CSS файлы (globals.css, styles/), package.json (стек), текущие компоненты.\n"
+        "\n"
+        "ТВОЯ ЗОНА ОТВЕТСТВЕННОСТИ:\n"
+        "✅ Редактирование CSS/SCSS файлов (globals.css, variables, theme files)\n"
+        "✅ Создание/редактирование компонентных стилей\n"
+        "✅ Обновление дизайн-токенов (CSS переменные: --color-*, --font-*, --spacing-*)\n"
+        "✅ Tailwind config (tailwind.config.js) — цвета, шрифты, spacing\n"
+        "❌ НЕ трогаешь логику компонентов (JSX/TSX), только стили\n"
+        "❌ НЕ запускаешь сборку (npm build) — это зона DevOps\n"
+        "\n"
+        "ДИЗАЙН-ПРИНЦИПЫ (всегда соблюдай):\n"
+        "- Никакого оранжевого/кислотного как primary/hero background\n"
+        "- Крипто/финтех: тёмный фон (#080c14 или аналог), синий/фиолетовый акцент\n"
+        "- Профессиональные референсы: Coinbase, Binance, Stripe, Linear\n"
+        "- Конкретные hex-значения в CSS переменных — никакого 'светло-синего'\n"
+        "\n"
+        "РАБОЧИЙ ПРОЦЕСС:\n"
+        "1. Прочитай существующие CSS/globals.css — пойми текущую систему\n"
+        "2. Определи что менять (конкретные правила, переменные)\n"
+        "3. Внеси изменения в CSS файлы\n"
+        "4. Проверь что изменения применились (cat файл)\n"
+        "\n"
+        "В note финального шага: изменённые файлы, список изменённых CSS правил/переменных."
     ),
 }
 
@@ -166,6 +194,7 @@ DISCOVERY_PREFIXES = (
     "netstat",
     "ss ",
     "lsof",
+    "fuser ",
     "df ",
     "du ",
     "jq ",
@@ -297,14 +326,25 @@ def _call_openai(messages: list[dict[str, str]], model: str, base_url: str, api_
             "Content-Type": "application/json",
         },
     )
-    try:
-        with urllib.request.urlopen(request, timeout=90) as response:
-            data = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        error_payload = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"OpenAI HTTP {exc.code}: {error_payload}") from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"OpenAI connection error: {exc}") from exc
+    last_exc: Exception | None = None
+    for attempt in range(4):
+        try:
+            with urllib.request.urlopen(request, timeout=90) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            last_exc = None
+            break
+        except urllib.error.HTTPError as exc:
+            error_payload = exc.read().decode("utf-8", errors="replace")
+            if exc.code == 429 and attempt < 3:
+                wait = 15 * (attempt + 1)
+                time.sleep(wait)
+                last_exc = exc
+                continue
+            raise RuntimeError(f"OpenAI HTTP {exc.code}: {error_payload}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"OpenAI connection error: {exc}") from exc
+    if last_exc is not None:
+        raise RuntimeError(f"OpenAI rate limit after retries: {last_exc}") from last_exc
 
     content = data["choices"][0]["message"]["content"]
     return _parse_json_maybe(content)

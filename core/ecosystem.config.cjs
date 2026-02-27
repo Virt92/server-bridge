@@ -132,6 +132,15 @@ module.exports = {
       env: sharedEnv,
     },
     {
+      name: 'agent-designer',
+      script: 'python3',
+      args: 'orchestrator/agent_worker.py designer',
+      cwd: '/root/core',
+      autorestart: true,
+      watch: false,
+      env: sharedEnv,
+    },
+    {
       name: 'git-sync',
       script: '/root/core/scripts/git-sync.sh',
       interpreter: 'bash',

@@ -331,7 +331,7 @@ def seed_memory(role: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("role", choices=["frontend", "backend", "devops", "qa"])
+    parser.add_argument("role", choices=["frontend", "backend", "devops", "qa", "designer"])
     args = parser.parse_args()
 
     role = args.role
