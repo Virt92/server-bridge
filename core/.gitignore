@@ -3,5 +3,6 @@
 data/
 logs/
 orchestrator/__pycache__/
+orchestrator/memory.md
 developers/*/logs/
 developers/*/memory.md

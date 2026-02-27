@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ai_executor import run_ai_task
-from common import DATA_DIR, DEVELOPERS_DIR, append_memory, read_task, write_task
+from common import DATA_DIR, DEVELOPERS_DIR, append_memory, ensure_runtime_layout, read_task, write_task
 
 POLL_SECONDS = 3
 
@@ -207,7 +207,10 @@ def process_one(role: str) -> None:
     dev_dir = DEVELOPERS_DIR / role
     memory_path = dev_dir / "memory.md"
     logs_dir = dev_dir / "logs"
+    queue_dir.mkdir(parents=True, exist_ok=True)
+    done_dir.mkdir(parents=True, exist_ok=True)
     failed_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir.mkdir(parents=True, exist_ok=True)
 
     for task_file in sorted(queue_dir.glob("*.json")):
         title = task_file.stem
@@ -289,6 +292,7 @@ def main() -> None:
     args = parser.parse_args()
 
     role = args.role
+    ensure_runtime_layout()
     seed_memory(role)
     append_memory(DEVELOPERS_DIR / role / "memory.md", "doing", f"Агент {role} запущен")
 

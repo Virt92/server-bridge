@@ -2,6 +2,16 @@
 
 Multi-agent оркестратор с 4 ролями, отдельными очередями и AI-режимом выполнения.
 
+## HTTP API Service
+- `GET /healthz` - liveness
+- `GET /readyz` - readiness (roles + data layout)
+- `POST /v1/tasks/submit` - создать задачу в `data/incoming`
+- `GET /v1/tasks/<task_id>/status` - текущий статус/бакет
+- `GET /v1/tasks/<task_id>/result` - итог, когда задача `done`/`failed`
+
+Запуск API локально:
+`python3 orchestrator/api_server.py --host 0.0.0.0 --port 8080`
+
 ## Роли
 - `frontend` — UI, страницы, стили, клиентская логика
 - `backend` — API, БД, серверная логика
@@ -17,6 +27,11 @@ Multi-agent оркестратор с 4 ролями, отдельными оч�
    - `tail -f developers/frontend/memory.md`
    - `./pm2-core logs`
    - `./pm2-core jlist`
+
+Альтернатива без PM2:
+- API: `python3 orchestrator/api_server.py`
+- Оркестратор: `python3 orchestrator/orchestrator.py`
+- Воркеры: `python3 orchestrator/agent_worker.py <frontend|backend|devops|qa>`
 
 ## PM2 изоляция
 - Используй `./pm2-core ...` вместо `pm2 ...`.
@@ -52,6 +67,13 @@ Multi-agent оркестратор с 4 ролями, отдельными оч�
 - `manual` — только зарегистрировать задачу без автозапуска
 
 Если `role` не указан, оркестратор выбирает роль по ключевым словам.
+
+Через API:
+```bash
+curl -sS -X POST http://127.0.0.1:8080/v1/tasks/submit \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Smoke","description":"check","role":"backend","mode":"manual","workdir":"/workspace"}'
+```
 
 ## Команда `agent`
 - Быстрый вход в режим оркестратора: просто запусти `agent`.

@@ -1,0 +1,13 @@
+.git
+.gitignore
+node_modules
+npm-debug.log*
+.env
+.env.*
+core/.agent.env
+core/.pm2
+core/data
+core/logs
+core/orchestrator/__pycache__
+core/developers/*/logs
+core/developers/*/memory.md

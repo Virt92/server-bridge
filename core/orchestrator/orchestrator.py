@@ -5,7 +5,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from common import DATA_DIR, append_memory, load_roles, read_task, write_task
+from common import DATA_DIR, append_memory, ensure_runtime_layout, read_task, write_task
 from pm_planner import plan_pm_task
 
 POLL_SECONDS = 5
@@ -323,11 +323,12 @@ def ensure_memory_seed() -> None:
 
 
 def main() -> None:
+    ensure_runtime_layout()
     ensure_memory_seed()
     append_memory(ORCH_MEMORY, "doing", "Оркестратор запущен")
 
     while True:
-        roles = load_roles()
+        roles = ensure_runtime_layout()
         process_incoming(roles)
         refresh_pm_status(roles)
         time.sleep(POLL_SECONDS)

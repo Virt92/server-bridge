@@ -4,7 +4,7 @@ import json
 import uuid
 from typing import Any
 
-from common import DATA_DIR
+from common import DATA_DIR, ensure_runtime_layout
 
 
 def _dedupe(items: list[str]) -> list[str]:
@@ -77,6 +77,7 @@ def main() -> None:
     parser.add_argument("--ai-strategy", default="")
 
     args = parser.parse_args()
+    ensure_runtime_layout()
 
     mode = args.mode
     if mode == "auto":

@@ -1,0 +1,130 @@
+services:
+  core-api:
+    build:
+      context: ./core
+      dockerfile: Dockerfile
+    environment:
+      CORE_HOST: 0.0.0.0
+      CORE_PORT: 8080
+      CORE_API_MAX_BODY_BYTES: 1048576
+    command:
+      - /bin/sh
+      - -lc
+      - python3 orchestrator/api_server.py --host "${CORE_HOST:-0.0.0.0}" --port "${CORE_PORT:-8080}" --max-body-bytes "${CORE_API_MAX_BODY_BYTES:-1048576}"
+    volumes:
+      - core-data:/app/data
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://127.0.0.1:8080/healthz", timeout=2).read()
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  core-orchestrator:
+    build:
+      context: ./core
+      dockerfile: Dockerfile
+    command: ["python3", "orchestrator/orchestrator.py"]
+    volumes:
+      - core-data:/app/data
+    depends_on:
+      core-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  core-agent-frontend:
+    build:
+      context: ./core
+      dockerfile: Dockerfile
+    command: ["python3", "orchestrator/agent_worker.py", "frontend"]
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      AI_MODEL: ${AI_MODEL:-}
+    volumes:
+      - core-data:/app/data
+    depends_on:
+      core-orchestrator:
+        condition: service_started
+    restart: unless-stopped
+
+  core-agent-backend:
+    build:
+      context: ./core
+      dockerfile: Dockerfile
+    command: ["python3", "orchestrator/agent_worker.py", "backend"]
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      AI_MODEL: ${AI_MODEL:-}
+    volumes:
+      - core-data:/app/data
+    depends_on:
+      core-orchestrator:
+        condition: service_started
+    restart: unless-stopped
+
+  core-agent-devops:
+    build:
+      context: ./core
+      dockerfile: Dockerfile
+    command: ["python3", "orchestrator/agent_worker.py", "devops"]
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      AI_MODEL: ${AI_MODEL:-}
+    volumes:
+      - core-data:/app/data
+    depends_on:
+      core-orchestrator:
+        condition: service_started
+    restart: unless-stopped
+
+  core-agent-qa:
+    build:
+      context: ./core
+      dockerfile: Dockerfile
+    command: ["python3", "orchestrator/agent_worker.py", "qa"]
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      AI_MODEL: ${AI_MODEL:-}
+    volumes:
+      - core-data:/app/data
+    depends_on:
+      core-orchestrator:
+        condition: service_started
+    restart: unless-stopped
+
+  bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      MAX_BODY_BYTES: 1048576
+      CORE_API_BASE_URL: http://core-api:8080
+      CORE_API_TIMEOUT_MS: 10000
+    ports:
+      - "3000:3000"
+    depends_on:
+      core-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  core-data:

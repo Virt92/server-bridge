@@ -5,6 +5,8 @@ import { pathToFileURL } from "node:url";
 const DEFAULT_HOST = process.env.HOST || "0.0.0.0";
 const DEFAULT_PORT = Number(process.env.PORT || 3000);
 const DEFAULT_MAX_BODY_BYTES = Number(process.env.MAX_BODY_BYTES || 1024 * 1024);
+const DEFAULT_CORE_API_BASE_URL = process.env.CORE_API_BASE_URL || "http://127.0.0.1:8080";
+const DEFAULT_CORE_API_TIMEOUT_MS = Number(process.env.CORE_API_TIMEOUT_MS || 10000);
 
 function sendJson(res, statusCode, payload) {
   const body = JSON.stringify(payload);
@@ -68,8 +70,53 @@ function logRequest(entry) {
   );
 }
 
+async function callCoreApi(fetchImpl, baseUrl, timeoutMs, method, pathname, body = null) {
+  const targetUrl = `${baseUrl.replace(/\/+$/, "")}${pathname}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetchImpl(targetUrl, {
+      method,
+      headers: body ? { "content-type": "application/json" } : {},
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+
+    const rawText = await response.text();
+    let payload = {};
+    if (rawText.trim()) {
+      try {
+        payload = JSON.parse(rawText);
+      } catch (_err) {
+        payload = { raw: rawText };
+      }
+    }
+
+    return {
+      status: response.status,
+      payload,
+    };
+  } catch (err) {
+    if (err?.name === "AbortError") {
+      const timeoutError = new Error(`Core API timeout after ${timeoutMs}ms`);
+      timeoutError.code = "CORE_TIMEOUT";
+      throw timeoutError;
+    }
+    const networkError = new Error("Core API unavailable");
+    networkError.code = "CORE_UNAVAILABLE";
+    networkError.details = String(err?.message || err);
+    throw networkError;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function createServer(options = {}) {
   const maxBodyBytes = Number(options.maxBodyBytes || DEFAULT_MAX_BODY_BYTES);
+  const coreApiBaseUrl = String(options.coreApiBaseUrl || DEFAULT_CORE_API_BASE_URL);
+  const coreApiTimeoutMs = Number(options.coreApiTimeoutMs || DEFAULT_CORE_API_TIMEOUT_MS);
+  const fetchImpl = options.fetchImpl || fetch;
 
   return http.createServer(async (req, res) => {
     const started = Date.now();
@@ -88,10 +135,30 @@ export function createServer(options = {}) {
           time: new Date().toISOString(),
         });
       } else if (method === "GET" && url.pathname === "/readyz") {
-        sendJson(res, 200, {
-          status: "ready",
+        const coreReady = await callCoreApi(
+          fetchImpl,
+          coreApiBaseUrl,
+          coreApiTimeoutMs,
+          "GET",
+          "/readyz",
+        );
+        const isReady =
+          coreReady.status >= 200 &&
+          coreReady.status < 300 &&
+          coreReady.payload &&
+          coreReady.payload.status === "ready";
+
+        sendJson(res, isReady ? 200 : 503, {
+          status: isReady ? "ready" : "not_ready",
           service: "server-bridge",
           time: new Date().toISOString(),
+          dependencies: {
+            core_api: {
+              base_url: coreApiBaseUrl,
+              http_status: coreReady.status,
+              response_status: coreReady.payload?.status || "unknown",
+            },
+          },
         });
       } else if (method === "POST" && url.pathname === "/v1/bridge/echo") {
         const payload = await readJsonBody(req, maxBodyBytes);
@@ -100,6 +167,37 @@ export function createServer(options = {}) {
           received_at: new Date().toISOString(),
           payload,
         });
+      } else if (method === "POST" && url.pathname === "/v1/bridge/tasks/submit") {
+        const payload = await readJsonBody(req, maxBodyBytes);
+        const proxied = await callCoreApi(
+          fetchImpl,
+          coreApiBaseUrl,
+          coreApiTimeoutMs,
+          "POST",
+          "/v1/tasks/submit",
+          payload,
+        );
+        sendJson(res, proxied.status, proxied.payload);
+      } else if (method === "GET" && /^\/v1\/bridge\/tasks\/[^/]+\/status$/.test(url.pathname)) {
+        const taskId = decodeURIComponent(url.pathname.split("/")[4] || "");
+        const proxied = await callCoreApi(
+          fetchImpl,
+          coreApiBaseUrl,
+          coreApiTimeoutMs,
+          "GET",
+          `/v1/tasks/${encodeURIComponent(taskId)}/status`,
+        );
+        sendJson(res, proxied.status, proxied.payload);
+      } else if (method === "GET" && /^\/v1\/bridge\/tasks\/[^/]+\/result$/.test(url.pathname)) {
+        const taskId = decodeURIComponent(url.pathname.split("/")[4] || "");
+        const proxied = await callCoreApi(
+          fetchImpl,
+          coreApiBaseUrl,
+          coreApiTimeoutMs,
+          "GET",
+          `/v1/tasks/${encodeURIComponent(taskId)}/result`,
+        );
+        sendJson(res, proxied.status, proxied.payload);
       } else {
         sendError(res, 404, "NOT_FOUND", "Route not found", {
           method,
@@ -112,6 +210,15 @@ export function createServer(options = {}) {
       } else if (err.code === "BODY_TOO_LARGE") {
         sendError(res, 413, "PAYLOAD_TOO_LARGE", err.message, {
           max_body_bytes: maxBodyBytes,
+        });
+      } else if (err.code === "CORE_TIMEOUT") {
+        sendError(res, 504, "CORE_TIMEOUT", err.message, {
+          core_api_base_url: coreApiBaseUrl,
+        });
+      } else if (err.code === "CORE_UNAVAILABLE") {
+        sendError(res, 503, "CORE_UNAVAILABLE", err.message, {
+          core_api_base_url: coreApiBaseUrl,
+          reason: err.details || null,
         });
       } else {
         sendError(res, 500, "INTERNAL_ERROR", "Unhandled server error");

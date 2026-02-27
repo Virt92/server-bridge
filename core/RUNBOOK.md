@@ -1,5 +1,11 @@
 # Runbook
 
+## HTTP service
+- `python3 orchestrator/api_server.py --host 0.0.0.0 --port 8080`
+- Проверка:
+  - `curl -sS http://127.0.0.1:8080/healthz`
+  - `curl -sS http://127.0.0.1:8080/readyz`
+
 ## Старт
 - `cd /root/core`
 - `export OPENAI_API_KEY=...`
@@ -36,6 +42,15 @@
 - `agent task ...` — отправить задачу в `incoming`
 - `agent logs [proc]` — логи PM2
 - `agent down` — остановка/удаление PM2 процессов оркестратора
+
+## Docker Compose (из монорепо)
+- `cd /root/codex-workspaces/default/server-bridge`
+- `docker compose up -d --build`
+- `docker compose ps`
+- Логи:
+  - `docker compose logs -f core-api`
+  - `docker compose logs -f core-orchestrator`
+  - `docker compose logs -f core-agent-backend`
 
 ## PM-декомпозиция (директорский режим)
 - Отправка одной верхнеуровневой задачи:

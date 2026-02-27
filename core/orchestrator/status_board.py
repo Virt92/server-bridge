@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
 
-from common import DATA_DIR, read_task
+from common import DATA_DIR, ensure_runtime_layout, read_task
 
 ROLES = ["frontend", "backend", "devops", "qa"]
 
@@ -48,6 +48,7 @@ def pm_stats() -> tuple[int, int, int, int, list[str]]:
 
 
 def main() -> None:
+    ensure_runtime_layout()
     incoming = count_files(DATA_DIR / "incoming")
     failed_root = DATA_DIR / "failed"
     failed_generic = count_files(failed_root)
