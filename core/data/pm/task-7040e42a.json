@@ -1,0 +1,70 @@
+{
+  "id": "task-7040e42a",
+  "title": "Smoke QA gate routing",
+  "description": "Проверь доступность http://91.99.201.99:8081 если не работает верни на фиксы",
+  "mode": "pm",
+  "workdir": "/tmp",
+  "status": "in_progress",
+  "started_at": "2026-02-27T09:38:03Z",
+  "pm_plan_templates": [
+    {
+      "template_step": 1,
+      "title": "QA проверка: Smoke QA gate routing",
+      "description": "Контекст: Проверь доступность http://91.99.201.99:8081 если не работает верни на фиксы\nРоль: qa. Проверить изменения, прогнать smoke/regression и зафиксировать результаты.",
+      "role": "qa",
+      "mode": "ai",
+      "command": "",
+      "acceptance_criteria": "Отчет о проверке готов, критические дефекты либо исправлены, либо явно задокументированы."
+    }
+  ],
+  "pm_children": [
+    "task-f3a9b51e"
+  ],
+  "pm_plan": [
+    {
+      "id": "task-f3a9b51e",
+      "step": 1,
+      "role": "qa",
+      "mode": "ai",
+      "title": "QA проверка: Smoke QA gate routing",
+      "acceptance_criteria": "Отчет о проверке готов, критические дефекты либо исправлены, либо явно задокументированы.",
+      "stage": "parallel",
+      "round": 1
+    }
+  ],
+  "pm_note": "Fallback-планирование: Heuristic PM plan generated without OpenAI",
+  "pm_plan_status": "planned",
+  "pm_plan_source": "heuristic",
+  "pm_plan_meta": {
+    "source": "heuristic",
+    "model": "gpt-4.1-mini",
+    "errors": [
+      "OPENAI_API_KEY is not set"
+    ],
+    "summary": "Heuristic PM plan generated without OpenAI"
+  },
+  "assigned_at": "2026-02-27T09:38:03Z",
+  "pm_children_state": [
+    {
+      "id": "task-f3a9b51e",
+      "title": "QA проверка: Smoke QA gate routing",
+      "description": "Контекст: Проверь доступность http://91.99.201.99:8081 если не работает верни на фиксы\nРоль: qa. Проверить изменения, прогнать smoke/regression и зафиксировать результаты.",
+      "role": "qa",
+      "mode": "ai",
+      "status": "incoming",
+      "note": "",
+      "stage": "parallel",
+      "round": 1
+    }
+  ],
+  "pm_progress": {
+    "total": 1,
+    "done": 0,
+    "failed": 0,
+    "pending": 1,
+    "in_progress": 0,
+    "queued": 0,
+    "incoming": 1,
+    "missing": 0
+  }
+}

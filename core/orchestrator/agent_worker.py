@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import fnmatch
+import re
 import shutil
 import subprocess
 import time
@@ -11,6 +12,32 @@ from ai_executor import run_ai_task
 from common import DATA_DIR, DEVELOPERS_DIR, append_memory, ensure_runtime_layout, read_task, write_task
 
 POLL_SECONDS = 3
+
+QA_NEGATIVE_PATTERNS = (
+    r"\berror\b",
+    r"\bcurl error\b",
+    r"\bunreachable\b",
+    r"\bnot found\b",
+    r"\btimeout\b",
+    r"\brefused\b",
+    r"\bhttp\s*(?:status\s*)?[45]\d\d\b",
+    r"\b5\d\d\b",
+    r"не работает",
+    r"не отвечает",
+    r"недоступен",
+    r"таймаут",
+)
+
+QA_POSITIVE_PATTERNS = (
+    r"all checks passed",
+    r"no issues",
+    r"no bugs",
+    r"checks passed",
+    r"успешно",
+    r"корректно",
+    r"ошибок не",
+    r"багов не",
+)
 
 
 def run_command(command: str, workdir: str | None, log_path: Path) -> tuple[int, str]:
@@ -200,6 +227,19 @@ def evaluate_change_guard(task: dict[str, Any], workdir: Path) -> dict[str, Any]
     }
 
 
+def qa_note_indicates_failure(note: str) -> bool:
+    text = str(note or "").strip().lower()
+    if not text:
+        return False
+
+    has_negative = any(re.search(pattern, text) for pattern in QA_NEGATIVE_PATTERNS)
+    if not has_negative:
+        return False
+
+    has_positive = any(re.search(pattern, text) for pattern in QA_POSITIVE_PATTERNS)
+    return not has_positive
+
+
 def process_one(role: str) -> None:
     queue_dir = DATA_DIR / "queues" / role
     done_dir = DATA_DIR / "done" / role
@@ -248,6 +288,9 @@ def process_one(role: str) -> None:
                     note = f"Задача '{title}' завершена, code={code}"
             elif mode == "ai":
                 ai_status, ai_note, ai_log = run_ai_task(role, task, logs_dir)
+                if role == "qa" and ai_status == "done" and qa_note_indicates_failure(ai_note):
+                    ai_status = "blocked"
+                    ai_note = f"{ai_note}; QA verdict содержит нерешенные дефекты"
                 task["ai_status"] = ai_status
                 task["ai_note"] = ai_note
                 task["ai_log"] = ai_log

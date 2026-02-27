@@ -1,17 +1,64 @@
 #!/usr/bin/env python3
+import datetime
 import json
 import os
 import re
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 DEFAULT_MODEL = os.getenv("PM_MODEL", os.getenv("AI_MODEL", "gpt-4.1-mini"))
 DEFAULT_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+DEFAULT_PROVIDER = os.getenv("PM_PROVIDER", os.getenv("AI_PROVIDER", "openai")).strip().lower()
+ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1"
+ANTHROPIC_VERSION = "2023-06-01"
 MAX_PM_SUBTASKS = int(os.getenv("PM_MAX_SUBTASKS", "6"))
 
 VALID_ROLES = {"frontend", "backend", "devops", "qa"}
 VALID_MODES = {"ai", "command", "manual"}
+
+PM_MEMORY_PATH = Path(__file__).resolve().parent / "pm_memory.md"
+PM_MEMORY_MAX_ENTRIES = int(os.getenv("PM_MEMORY_MAX_ENTRIES", "30"))
+PM_MEMORY_MAX_CHARS = int(os.getenv("PM_MEMORY_MAX_CHARS", "1200"))
+
+
+def _read_pm_memory() -> str:
+    """Load recent PM memory entries for injection into system prompt."""
+    if not PM_MEMORY_PATH.exists():
+        return ""
+    try:
+        text = PM_MEMORY_PATH.read_text(encoding="utf-8").strip()
+    except Exception:
+        return ""
+    if not text:
+        return ""
+    if len(text) > PM_MEMORY_MAX_CHARS:
+        text = text[-PM_MEMORY_MAX_CHARS:]
+        newline_idx = text.find("\n")
+        if newline_idx > 0:
+            text = text[newline_idx + 1:]
+    return text
+
+
+def append_pm_memory(title: str, roles: list, outcome: str) -> None:
+    """Append a compact one-line entry to PM memory file, keeping last N entries."""
+    ts = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+    roles_str = ",".join(str(r) for r in roles) if roles else "?"
+    entry = f"{ts} | {title[:60]} | {roles_str} | {outcome}"
+    try:
+        existing: list[str] = []
+        if PM_MEMORY_PATH.exists():
+            existing = [
+                ln for ln in PM_MEMORY_PATH.read_text(encoding="utf-8").splitlines() if ln.strip()
+            ]
+        if len(existing) >= PM_MEMORY_MAX_ENTRIES:
+            existing = existing[-(PM_MEMORY_MAX_ENTRIES - 1):]
+        existing.append(entry)
+        PM_MEMORY_PATH.write_text("\n".join(existing) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
 
 ROLE_HEURISTIC_TEMPLATES = {
     "frontend": {
@@ -35,6 +82,30 @@ ROLE_HEURISTIC_TEMPLATES = {
         "acceptance": "Отчет о проверке готов, критические дефекты либо исправлены, либо явно задокументированы.",
     },
 }
+
+INCIDENT_DEVOPS_HINTS = (
+    "http://",
+    "https://",
+    "ip",
+    "host",
+    "domain",
+    "dns",
+    "deploy",
+    "down",
+    "uptime",
+    "port",
+    "caddy",
+    "nginx",
+    "502",
+    "503",
+    "504",
+    "timeout",
+    "доступ",
+    "сервер",
+    "домен",
+    "порт",
+    "деплой",
+)
 
 
 def _parse_json_maybe(text: str) -> dict[str, Any]:
@@ -86,11 +157,70 @@ def _call_openai(messages: list[dict[str, str]]) -> dict[str, Any]:
     return _parse_json_maybe(content)
 
 
+def _call_anthropic(messages: list[dict[str, str]]) -> dict[str, Any]:
+    api_key = (
+        os.getenv("ANTHROPIC_API_KEY")
+        or os.getenv("OPENAI_API_KEY_PM")
+        or os.getenv("OPENAI_API_KEY", "")
+    ).strip()
+    if not api_key:
+        raise RuntimeError("ANTHROPIC_API_KEY is not set")
+
+    system_content = ""
+    user_messages = []
+    for msg in messages:
+        if msg.get("role") == "system":
+            system_content = msg.get("content", "")
+        else:
+            user_messages.append({"role": msg["role"], "content": msg["content"]})
+
+    pm_payload: dict[str, Any] = {
+        "model": DEFAULT_MODEL,
+        "max_tokens": 4096,
+        "temperature": 0.1,
+        "messages": user_messages,
+    }
+    if system_content:
+        pm_payload["system"] = system_content
+
+    request = urllib.request.Request(
+        f"{ANTHROPIC_BASE_URL}/messages",
+        data=json.dumps(pm_payload).encode("utf-8"),
+        method="POST",
+        headers={
+            "x-api-key": api_key,
+            "anthropic-version": ANTHROPIC_VERSION,
+            "Content-Type": "application/json",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=90) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        err_body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Anthropic HTTP {exc.code}: {err_body}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Anthropic connection error: {exc}") from exc
+
+    content = data["content"][0]["text"]
+    return _parse_json_maybe(content)
+
+
+def _call_ai(messages: list[dict[str, str]]) -> dict[str, Any]:
+    if DEFAULT_PROVIDER == "anthropic":
+        return _call_anthropic(messages)
+    return _call_openai(messages)
+
+
 def _normalize_mode(mode: str, command: str) -> str:
     normalized = (mode or "").strip().lower()
     if normalized not in VALID_MODES:
         normalized = "command" if command else "ai"
     if normalized == "command" and not command:
+        normalized = "ai"
+    # PM child tasks must be executable by agents; manual mode skips real execution.
+    if normalized == "manual":
         normalized = "ai"
     return normalized
 
@@ -163,6 +293,13 @@ def _match_roles_by_keywords(task: dict[str, Any], roles: dict[str, Any]) -> lis
     if len(matched) == 1 and matched[0] != "qa":
         matched.append("qa")
 
+    # For QA-only incident checks we still need an implementation role for follow-up fixes.
+    if matched == ["qa"]:
+        if any(hint in corpus for hint in INCIDENT_DEVOPS_HINTS):
+            matched.append("devops")
+        else:
+            matched.append("backend")
+
     ordered = [r for r in ["frontend", "backend", "devops", "qa"] if r in matched]
     return ordered[:MAX_PM_SUBTASKS]
 
@@ -189,8 +326,58 @@ def _heuristic_plan(task: dict[str, Any], roles: dict[str, Any]) -> tuple[str, l
             }
         )
 
+    tasks = _ensure_fix_role_for_qa_only(tasks, task, roles)
     summary = "Heuristic PM plan generated without OpenAI"
     return summary, tasks
+
+
+def _ensure_fix_role_for_qa_only(
+    tasks: list[dict[str, Any]],
+    task: dict[str, Any],
+    roles: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if not tasks:
+        return tasks
+
+    role_set = {str(item.get("role") or "").strip().lower() for item in tasks}
+    if role_set != {"qa"}:
+        return tasks
+
+    corpus = " ".join(
+        [
+            str(task.get("title", "")),
+            str(task.get("description", "")),
+            str(task.get("tags", "")),
+        ]
+    ).lower()
+
+    candidate_order = ["devops", "backend", "frontend"]
+    preferred = "devops" if any(hint in corpus for hint in INCIDENT_DEVOPS_HINTS) else "backend"
+    if preferred in candidate_order:
+        candidate_order.remove(preferred)
+    candidate_order.insert(0, preferred)
+
+    target_role = next((role for role in candidate_order if role in roles and role in VALID_ROLES), "")
+    if not target_role:
+        return tasks
+
+    tpl = ROLE_HEURISTIC_TEMPLATES.get(target_role, ROLE_HEURISTIC_TEMPLATES["backend"])
+    title = f"{tpl['title']}: {task.get('title', 'Новая задача')}"
+    description = (
+        f"Контекст: {str(task.get('description') or task.get('title') or '').strip()}\n"
+        f"Роль: {target_role}. {tpl['description']}"
+    ).strip()
+    tasks.append(
+        {
+            "title": title,
+            "description": description,
+            "role": target_role,
+            "mode": "ai",
+            "command": "",
+            "acceptance_criteria": tpl["acceptance"],
+        }
+    )
+    return tasks[:MAX_PM_SUBTASKS]
 
 
 def _plan_with_ai(task: dict[str, Any], roles: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
@@ -202,6 +389,13 @@ def _plan_with_ai(task: dict[str, Any], roles: dict[str, Any]) -> tuple[str, lis
         for role, cfg in roles.items()
     }
 
+    memory_block = _read_pm_memory()
+    memory_section = (
+        f"\nПамять PM (прошлые задачи — дата|название|роли|итог):\n{memory_block}\n"
+        if memory_block
+        else ""
+    )
+
     system_prompt = (
         "Ты технический project manager/директор разработки. "
         "Нужно декомпозировать одну входную задачу на подзадачи для ролей frontend/backend/devops/qa.\n"
@@ -211,7 +405,9 @@ def _plan_with_ai(task: dict[str, Any], roles: dict[str, Any]) -> tuple[str, lis
         "- Выбирай только доступные роли.\n"
         "- По возможности делай параллельные подзадачи по разным ролям.\n"
         "- mode обычно ai. mode=command указывай только если есть конкретная безопасная команда.\n"
+        "- Не используй mode=manual для PM-подзадач.\n"
         "- Для каждой подзадачи дай четкий title/description/acceptance_criteria.\n"
+        f"{memory_section}"
     )
 
     payload = {
@@ -224,7 +420,7 @@ def _plan_with_ai(task: dict[str, Any], roles: dict[str, Any]) -> tuple[str, lis
                     "title": "...",
                     "description": "...",
                     "role": "frontend|backend|devops|qa",
-                    "mode": "ai|command|manual",
+                    "mode": "ai|command",
                     "command": "optional shell command",
                     "acceptance_criteria": "...",
                 }
@@ -232,7 +428,7 @@ def _plan_with_ai(task: dict[str, Any], roles: dict[str, Any]) -> tuple[str, lis
         },
     }
 
-    decision = _call_openai(
+    decision = _call_ai(
         [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
@@ -244,6 +440,7 @@ def _plan_with_ai(task: dict[str, Any], roles: dict[str, Any]) -> tuple[str, lis
         raw_tasks = []
 
     tasks = _normalize_tasks(raw_tasks, task, roles)
+    tasks = _ensure_fix_role_for_qa_only(tasks, task, roles)
     if not tasks:
         raise RuntimeError("PM planner returned no valid subtasks")
 

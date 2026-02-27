@@ -4,9 +4,12 @@ const sharedEnv = {
 
 const optionalEnvKeys = [
   'OPENAI_API_KEY',
+  'ANTHROPIC_API_KEY',
   'OPENAI_BASE_URL',
   'AI_PROVIDER',
   'AI_MODEL',
+  'PM_MODEL',
+  'PM_PROVIDER',
   'AI_MAX_STEPS',
   'AI_MAX_COMMANDS_PER_STEP',
   'AI_CMD_OUTPUT_CHARS',
@@ -49,6 +52,17 @@ for (const key of optionalEnvKeys) {
 
 module.exports = {
   apps: [
+    {
+      name: 'core-api',
+      script: 'python3',
+      args: 'orchestrator/api_server.py --host 0.0.0.0 --port 8080',
+      cwd: '/root/core',
+      autorestart: true,
+      watch: false,
+      max_restarts: 20,
+      restart_delay: 2000,
+      env: { ...sharedEnv, PYTHONUNBUFFERED: '1' },
+    },
     {
       name: 'orch-main',
       script: 'python3',
@@ -95,6 +109,37 @@ module.exports = {
       autorestart: true,
       watch: false,
       env: sharedEnv,
+    },
+    {
+      name: 'git-sync',
+      script: '/root/core/scripts/git-sync.sh',
+      interpreter: 'bash',
+      cwd: '/root/core',
+      autorestart: true,
+      watch: false,
+      max_restarts: 10,
+      restart_delay: 5000,
+      env: {
+        GIT_SYNC_INTERVAL_SEC: '1800',
+        HOME: '/root',
+      },
+    },
+    {
+      name: 'server-bridge',
+      script: 'node',
+      args: 'src/server.js',
+      cwd: '/root/codex-workspaces/default/server-bridge',
+      autorestart: true,
+      watch: false,
+      max_restarts: 20,
+      restart_delay: 2000,
+      env: {
+        HOST: '0.0.0.0',
+        PORT: '3001',
+        MAX_BODY_BYTES: '1048576',
+        CORE_API_BASE_URL: 'http://127.0.0.1:8080',
+        CORE_API_TIMEOUT_MS: '10000',
+      },
     },
   ],
 };

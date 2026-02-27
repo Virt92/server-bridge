@@ -56,6 +56,9 @@
 - Отправка одной верхнеуровневой задачи:
   - `agent pm --title "..." --description "..." --workdir /root/my-project`
 - Оркестратор планирует и раздаёт подзадачи агентам по ролям.
+- Если в плане есть `qa` + роли реализации, оркестратор работает фазами:
+  - `qa_gate` -> `implementation` -> `qa_recheck`.
+  - При неуспешном re-check возможен повторный круг фиксов (до `PM_QA_MAX_ROUNDS`).
 - Статус смотреть:
   - `agent status`
   - `python3 orchestrator/status_board.py`

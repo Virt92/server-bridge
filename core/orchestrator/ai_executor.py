@@ -14,11 +14,14 @@ from common import DATA_DIR
 
 DEFAULT_MODEL = os.getenv("AI_MODEL", "gpt-4.1-mini")
 DEFAULT_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1"
+ANTHROPIC_VERSION = "2023-06-01"
 MAX_STEPS = int(os.getenv("AI_MAX_STEPS", "5"))
 MAX_COMMANDS_PER_STEP = int(os.getenv("AI_MAX_COMMANDS_PER_STEP", "3"))
 MAX_OUTPUT_CHARS = int(os.getenv("AI_CMD_OUTPUT_CHARS", "4000"))
 DEFAULT_COMMAND_TIMEOUT = int(os.getenv("AI_COMMAND_TIMEOUT_SEC", "180"))
 MAX_ROLE_PROFILE_CHARS = int(os.getenv("AI_ROLE_PROFILE_CHARS", "12000"))
+ALLOW_PRIVILEGED_CMDS = str(os.getenv("AI_ALLOW_PRIVILEGED_CMDS", "0")).strip().lower() in {"1", "true", "yes", "on"}
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 ROLE_PROFILE_ROOT = BASE_DIR / "developers"
@@ -38,7 +41,7 @@ ROLE_BRIEF = {
     ),
 }
 
-DANGEROUS_PATTERNS = [
+ALWAYS_DANGEROUS_PATTERNS = [
     r"(^|\s)rm(\s|$)",
     r"(^|\s)sudo(\s|$)",
     r"(^|\s)reboot(\s|$)",
@@ -52,6 +55,12 @@ DANGEROUS_PATTERNS = [
     r"git\s+checkout\s+--",
     r"curl.+\|\s*(sh|bash)",
     r"wget.+\|\s*(sh|bash)",
+]
+
+PRIVILEGED_PATTERNS = [
+    r"(^|\s)apt(-get)?\s+install(\s|$)",
+    r"(^|\s)(yum|dnf|apk)\s+install(\s|$)",
+    r"(^|\s)systemctl(\s|$)",
 ]
 
 DISCOVERY_PREFIXES = (
@@ -96,7 +105,11 @@ def _truncate(text: str) -> str:
 
 
 def _is_safe_command(cmd: str) -> tuple[bool, str]:
-    for pattern in DANGEROUS_PATTERNS:
+    patterns = list(ALWAYS_DANGEROUS_PATTERNS)
+    if not ALLOW_PRIVILEGED_CMDS:
+        patterns.extend(PRIVILEGED_PATTERNS)
+
+    for pattern in patterns:
         if re.search(pattern, cmd, flags=re.IGNORECASE):
             return False, pattern
     return True, ""
@@ -160,6 +173,52 @@ def _call_openai(messages: list[dict[str, str]], model: str, base_url: str, api_
         raise RuntimeError(f"OpenAI connection error: {exc}") from exc
 
     content = data["choices"][0]["message"]["content"]
+    return _parse_json_maybe(content)
+
+
+def _call_anthropic(messages: list[dict[str, str]], model: str, base_url: str, api_key: str) -> dict[str, Any]:
+    if not api_key.strip():
+        raise RuntimeError("Anthropic API key is not set")
+
+    system_content = ""
+    user_messages = []
+    for msg in messages:
+        if msg.get("role") == "system":
+            system_content = msg.get("content", "")
+        else:
+            user_messages.append({"role": msg["role"], "content": msg["content"]})
+
+    payload: dict[str, Any] = {
+        "model": model,
+        "max_tokens": 4096,
+        "temperature": 0.2,
+        "messages": user_messages,
+    }
+    if system_content:
+        payload["system"] = system_content
+
+    body = json.dumps(payload).encode("utf-8")
+    effective_base = base_url.rstrip("/") if base_url.rstrip("/") != DEFAULT_BASE_URL.rstrip("/") else ANTHROPIC_BASE_URL
+    request = urllib.request.Request(
+        f"{effective_base}/messages",
+        data=body,
+        method="POST",
+        headers={
+            "x-api-key": api_key,
+            "anthropic-version": ANTHROPIC_VERSION,
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=90) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        error_payload = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Anthropic HTTP {exc.code}: {error_payload}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Anthropic connection error: {exc}") from exc
+
+    content = data["content"][0]["text"]
     return _parse_json_maybe(content)
 
 
@@ -306,11 +365,21 @@ def _build_messages(
             "- После discovery сразу переходи к точечным правкам и проверке.\n"
         )
 
+    qa_verdict_block = ""
+    if role == "qa":
+        qa_verdict_block = (
+            "\nДополнительные правила QA verdict:\n"
+            "- Если найден дефект (включая недоступность URL/API, неверный статус-код, broken flow), верни decision=blocked.\n"
+            "- decision=done используй только когда проверки пройдены и дефекты не обнаружены.\n"
+            "- В note кратко укажи что именно проверено и итоговый verdict.\n"
+        )
+
     system_prompt = (
         f"{role_prompt}\n"
         f"{profile_block}"
         f"{change_scope_block}"
         f"{strategy_block}"
+        f"{qa_verdict_block}"
         "Ты работаешь как автономный агент.\n"
         "Правила:\n"
         "- Только неинтерактивные shell-команды.\n"
@@ -408,7 +477,7 @@ def run_ai_task(role: str, task: dict[str, Any], logs_dir: Path) -> tuple[str, s
     }
     transcript_path = logs_dir / f"{task_id}.ai.json"
 
-    if provider != "openai":
+    if provider not in {"openai", "anthropic"}:
         transcript["status"] = "blocked"
         transcript["final_note"] = f"AI provider '{provider}' is not supported in this runtime"
         transcript["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -436,7 +505,10 @@ def run_ai_task(role: str, task: dict[str, Any], logs_dir: Path) -> tuple[str, s
         step_payload: dict[str, Any] = {"step": step, "agent": {}, "runs": []}
 
         try:
-            decision = _call_openai(messages, model=model, base_url=base_url, api_key=api_key)
+            if provider == "anthropic":
+                decision = _call_anthropic(messages, model=model, base_url=base_url, api_key=api_key)
+            else:
+                decision = _call_openai(messages, model=model, base_url=base_url, api_key=api_key)
             step_payload["agent"] = decision
         except Exception as exc:
             final_status = "error"

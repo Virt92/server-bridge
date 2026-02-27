@@ -1,0 +1,16 @@
+{
+  "id": "task-f3a9b51e",
+  "title": "QA проверка: Smoke QA gate routing",
+  "description": "Контекст: Проверь доступность http://91.99.201.99:8081 если не работает верни на фиксы\nРоль: qa. Проверить изменения, прогнать smoke/regression и зафиксировать результаты.",
+  "role": "qa",
+  "command": "",
+  "workdir": "/tmp",
+  "mode": "ai",
+  "status": "new",
+  "pm_parent_id": "task-7040e42a",
+  "pm_parent_title": "Smoke QA gate routing",
+  "pm_step": 1,
+  "pm_stage": "parallel",
+  "pm_round": 1,
+  "pm_acceptance": "Отчет о проверке готов, критические дефекты либо исправлены, либо явно задокументированы."
+}

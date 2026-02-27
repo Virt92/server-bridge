@@ -114,6 +114,11 @@ def resolve_role_ai_settings(
             api_key = os.getenv(env_name, "")
             api_key_source = env_name
             api_key_env = env_name
+        elif provider == "anthropic" and os.getenv("ANTHROPIC_API_KEY"):
+            api_key = os.getenv("ANTHROPIC_API_KEY", "")
+            api_key_source = "ANTHROPIC_API_KEY"
+            if not api_key_env:
+                api_key_env = "ANTHROPIC_API_KEY"
         else:
             api_key = os.getenv("OPENAI_API_KEY", "")
             api_key_source = "OPENAI_API_KEY"
