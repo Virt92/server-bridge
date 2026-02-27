@@ -157,6 +157,17 @@ module.exports = {
       env: { PORT: '4000' },
     },
     {
+      name: 'crypto-landing',
+      script: 'npm',
+      args: 'start',
+      cwd: '/root/projects/crypto-landing',
+      autorestart: true,
+      watch: false,
+      max_restarts: 5,
+      restart_delay: 3000,
+      env: { PORT: '4002' },
+    },
+    {
       name: 'server-bridge',
       script: 'node',
       args: 'src/server.js',
