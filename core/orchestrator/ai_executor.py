@@ -109,6 +109,7 @@ PRIVILEGED_PATTERNS = [
 
 DISCOVERY_PREFIXES = (
     "pwd",
+    "cd ",
     "ls",
     "find ",
     "rg ",
@@ -171,6 +172,14 @@ DISCOVERY_PREFIXES = (
     "systemctl status",
     "service ",
     "journalctl",
+    "ufw status",
+    "ufw app list",
+    "iptables -L",
+    "curl -o /dev/null",
+    "curl -I ",
+    "curl -i ",
+    "cat /etc/",
+    "cat /root/",
 )
 
 DISCOVERY_FORBIDDEN_TOKENS = (
