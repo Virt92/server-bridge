@@ -455,13 +455,19 @@ def _build_messages(
         "- Указывай конкретные файлы и строки: 'исправлено src/api.py:87', 'ошибка в config/nginx.conf:14'.\n"
         "- decision=done — только когда задача реально завершена и результат проверен.\n"
         "- decision=blocked — чёткая причина: что именно мешает, что нужно для продолжения.\n"
+        "- В финальном note кратко опиши что создал/изменил — это увидят следующие агенты в pipeline.\n"
+        "\n"
+        "**Командная работа (sequential pipeline):**\n"
+        "- Если в задаче есть `completed_predecessors` — изучи их результаты в discovery-фазе.\n"
+        "- Используй созданные ими файлы, не дублируй их работу.\n"
+        "- Работай в том же workdir что и предшественники.\n"
         f"{change_scope_block}"
         f"{strategy_block}"
         f"{qa_verdict_block}"
         "\nОтвет строго JSON.\n"
     )
 
-    user_prompt = {
+    user_prompt: dict[str, Any] = {
         "task": task,
         "workdir": str(workdir),
         "history": history,
@@ -473,6 +479,10 @@ def _build_messages(
             "commands": ["shell command 1", "shell command 2"],
         },
     }
+
+    siblings = task.get("siblings_context")
+    if isinstance(siblings, list) and siblings:
+        user_prompt["completed_predecessors"] = siblings
 
     return [
         {"role": "system", "content": system_prompt},

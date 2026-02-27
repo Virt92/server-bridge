@@ -174,10 +174,14 @@ def _build_pm_child_payload(
     step: int,
     pm_stage: str,
     pm_round: int,
+    siblings_context: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     parent_id = str(parent_task.get("id") or "")
     parent_title = str(parent_task.get("title") or parent_id)
     child_id = f"task-{uuid.uuid4().hex[:8]}"
+
+    # workdir: pm_workdir > parent workdir > empty
+    workdir = str(parent_task.get("pm_workdir") or parent_task.get("workdir") or "")
 
     payload = {
         "id": child_id,
@@ -185,7 +189,7 @@ def _build_pm_child_payload(
         "description": str(template.get("description") or parent_task.get("description") or ""),
         "role": str(template.get("role") or "").strip().lower(),
         "command": str(template.get("command") or ""),
-        "workdir": str(parent_task.get("workdir") or ""),
+        "workdir": workdir,
         "mode": str(template.get("mode") or "ai"),
         "status": "new",
         "pm_parent_id": parent_id,
@@ -194,7 +198,11 @@ def _build_pm_child_payload(
         "pm_stage": pm_stage,
         "pm_round": pm_round,
         "pm_acceptance": str(template.get("acceptance_criteria") or ""),
+        "pm_template_id": str(template.get("template_id") or "").strip(),
     }
+
+    if siblings_context:
+        payload["siblings_context"] = siblings_context
 
     parent_change_request = parent_task.get("change_request")
     if isinstance(parent_change_request, dict):
@@ -206,6 +214,7 @@ def _build_pm_child_payload(
 def _child_plan_item(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": str(payload.get("id") or ""),
+        "template_id": str(payload.get("pm_template_id") or ""),
         "step": int(payload.get("pm_step") or 0),
         "role": str(payload.get("role") or ""),
         "mode": str(payload.get("mode") or ""),
@@ -216,7 +225,13 @@ def _child_plan_item(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _enqueue_pm_child(parent_task: dict[str, Any], template: dict[str, Any], pm_stage: str, pm_round: int) -> dict[str, Any]:
+def _enqueue_pm_child(
+    parent_task: dict[str, Any],
+    template: dict[str, Any],
+    pm_stage: str,
+    pm_round: int,
+    siblings_context: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     children = [str(item).strip() for item in parent_task.get("pm_children", []) if str(item).strip()]
     step = len(children) + 1
 
@@ -226,6 +241,7 @@ def _enqueue_pm_child(parent_task: dict[str, Any], template: dict[str, Any], pm_
         step=step,
         pm_stage=pm_stage,
         pm_round=pm_round,
+        siblings_context=siblings_context,
     )
 
     child_path = DATA_DIR / "incoming" / f"{payload['id']}.json"
@@ -349,6 +365,7 @@ def _collect_pm_children_state(
         child_states.append(
             {
                 "id": child_id,
+                "template_id": str(child_task.get("pm_template_id") or "").strip(),
                 "title": child_task.get("title", child_id),
                 "description": child_task.get("description", ""),
                 "role": child_task.get("role", ""),
@@ -363,10 +380,132 @@ def _collect_pm_children_state(
     return counts, child_states
 
 
+def _build_sibling_context(
+    dep_ids: list[str],
+    child_by_tid: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build compact context from completed predecessor tasks for injection into next task."""
+    siblings: list[dict[str, Any]] = []
+    for dep_tid in dep_ids:
+        cs = child_by_tid.get(dep_tid)
+        if not cs:
+            continue
+        note = str(cs.get("note") or "").strip()
+        siblings.append({
+            "role": str(cs.get("role") or ""),
+            "title": str(cs.get("title") or ""),
+            "status": str(cs.get("status") or ""),
+            "result": note[:600] if note else "(нет данных)",
+        })
+    return siblings
+
+
+def _advance_sequential_workflow(
+    parent_task: dict[str, Any],
+    child_states: list[dict[str, Any]],
+) -> tuple[bool, str]:
+    """Drive sequential dependency workflow. Dispatches all newly-ready tasks each cycle."""
+    workflow = parent_task.get("pm_workflow")
+    if not isinstance(workflow, dict):
+        return False, ""
+
+    templates = parent_task.get("pm_plan_templates") or []
+
+    dispatched: set[str] = set(workflow.get("dispatched_template_ids") or [])
+    completed: set[str] = set(workflow.get("completed_template_ids") or [])
+    failed_set: set[str] = set(workflow.get("failed_template_ids") or [])
+
+    # Build lookup: template_id → child state
+    child_by_tid: dict[str, dict[str, Any]] = {}
+    for cs in child_states:
+        tid = str(cs.get("template_id") or "").strip()
+        if tid:
+            child_by_tid[tid] = cs
+
+    # Update completed/failed from child states
+    state_changed = False
+    for tid, cs in child_by_tid.items():
+        if cs["status"] == "done" and tid not in completed:
+            completed.add(tid)
+            state_changed = True
+            append_memory(
+                ORCH_MEMORY, "done",
+                f"Sequential: '{cs.get('title', tid)}' ({cs.get('role', '?')}) завершена",
+            )
+        elif cs["status"] == "failed" and tid not in failed_set:
+            failed_set.add(tid)
+            state_changed = True
+            append_memory(
+                ORCH_MEMORY, "error",
+                f"Sequential: '{cs.get('title', tid)}' ({cs.get('role', '?')}) упала",
+            )
+
+    workflow["completed_template_ids"] = list(completed)
+    workflow["failed_template_ids"] = list(failed_set)
+
+    if failed_set:
+        workflow["stage"] = "failed"
+        workflow["current_stage_child_ids"] = []
+        _workflow_history_add(workflow, "sequential_failed", {"failed": list(failed_set)})
+        parent_task["status"] = "failed"
+        parent_task["completed_at"] = parent_task.get("completed_at") or now_iso()
+        parent_task["pm_workflow"] = workflow
+        return True, "sequential_failed"
+
+    # Dispatch all newly-ready templates in one cycle
+    newly_dispatched: list[str] = []
+    for template in templates:
+        tid = str(template.get("template_id") or "").strip()
+        if not tid or tid in dispatched:
+            continue
+        deps = [str(d).strip() for d in (template.get("depends_on") or []) if str(d).strip()]
+        if all(d in completed for d in deps):
+            siblings = _build_sibling_context(deps, child_by_tid)
+            _enqueue_pm_child(
+                parent_task,
+                template=template,
+                pm_stage="sequential",
+                pm_round=1,
+                siblings_context=siblings if siblings else None,
+            )
+            dispatched.add(tid)
+            newly_dispatched.append(f"{template.get('role', '?')}({tid})")
+            state_changed = True
+            append_memory(
+                ORCH_MEMORY, "done",
+                f"Sequential: запущена '{template.get('title', tid)}' -> {template.get('role', '?')}",
+            )
+
+    workflow["dispatched_template_ids"] = list(dispatched)
+
+    # Check full completion
+    all_tids = {str(t.get("template_id") or "").strip() for t in templates if str(t.get("template_id") or "").strip()}
+    if all_tids and all_tids.issubset(completed):
+        workflow["stage"] = "completed"
+        workflow["current_stage_child_ids"] = []
+        _workflow_history_add(workflow, "sequential_completed")
+        parent_task["status"] = "done"
+        parent_task["completed_at"] = parent_task.get("completed_at") or now_iso()
+        parent_task["pm_workflow"] = workflow
+        return True, "sequential_completed"
+
+    active = [tid for tid in dispatched if tid not in completed and tid not in failed_set]
+    workflow["current_stage_child_ids"] = active
+    parent_task["pm_workflow"] = workflow
+
+    if newly_dispatched:
+        return True, f"sequential_dispatched: {', '.join(newly_dispatched)}"
+    return state_changed, ""
+
+
 def _advance_pm_workflow(parent_task: dict[str, Any], child_states: list[dict[str, Any]]) -> tuple[bool, str]:
     workflow = parent_task.get("pm_workflow")
     if not isinstance(workflow, dict) or not workflow.get("enabled"):
         return False, ""
+
+    wf_type = str(workflow.get("type") or "").strip().lower()
+    if wf_type == "sequential_v2":
+        return _advance_sequential_workflow(parent_task, child_states)
 
     stage = str(workflow.get("stage") or "").strip().lower()
     stage_child_ids = [str(item).strip() for item in workflow.get("current_stage_child_ids", []) if str(item).strip()]
@@ -580,12 +719,44 @@ def queue_pm_parent_task(task_file: Path, task: dict[str, Any], roles: dict[str,
         for idx, subtask in enumerate(subtasks, start=1)
     ]
 
+    # Store PM-decided workdir on parent task
+    pm_workdir = str(plan_meta.get("workdir") or task.get("workdir") or "").strip()
+    if pm_workdir:
+        task["pm_workdir"] = pm_workdir
+
     task["pm_plan_templates"] = templates
     task["pm_children"] = []
     task["pm_plan"] = []
 
     planned_children: list[dict[str, Any]] = []
-    if _should_enable_pm_qa_gate(templates):
+
+    # Check if PM provided dependency graph → use sequential_v2 workflow
+    has_deps = any(template.get("depends_on") for template in templates)
+
+    if has_deps:
+        # Sequential pipeline: dispatch only tasks with no unmet deps
+        no_dep_templates = [t for t in templates if not t.get("depends_on")]
+        dispatched_ids: list[str] = []
+        for template in no_dep_templates:
+            child = _enqueue_pm_child(task, template=template, pm_stage="sequential", pm_round=1)
+            planned_children.append(_child_plan_item(child))
+            dispatched_ids.append(str(template.get("template_id") or ""))
+        # Also dispatch tasks whose deps are already empty (same as no_dep, handled above)
+        task["pm_workflow"] = {
+            "type": "sequential_v2",
+            "enabled": True,
+            "stage": "sequential",
+            "dispatched_template_ids": dispatched_ids,
+            "completed_template_ids": [],
+            "failed_template_ids": [],
+            "current_stage_child_ids": dispatched_ids[:],
+            "history": [{"at": now_iso(), "event": "sequential_started", "dispatched": dispatched_ids}],
+        }
+        append_memory(
+            ORCH_MEMORY, "done",
+            f"PM: sequential pipeline '{parent_title}' — запущено {len(no_dep_templates)} из {len(templates)} задач",
+        )
+    elif _should_enable_pm_qa_gate(templates):
         qa_templates = [item for item in templates if str(item.get("role") or "").strip().lower() == "qa"]
         impl_templates = [item for item in templates if str(item.get("role") or "").strip().lower() in {"frontend", "backend", "devops"}]
         qa_gate_template = qa_templates[0]
