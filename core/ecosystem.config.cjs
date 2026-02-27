@@ -125,6 +125,17 @@ module.exports = {
       },
     },
     {
+      name: 'office-sim',
+      script: 'node',
+      args: 'server.js',
+      cwd: '/root/projects/office-sim',
+      autorestart: true,
+      watch: false,
+      max_restarts: 20,
+      restart_delay: 2000,
+      env: { PORT: '4000' },
+    },
+    {
       name: 'server-bridge',
       script: 'node',
       args: 'src/server.js',
