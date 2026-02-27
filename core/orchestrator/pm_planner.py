@@ -22,6 +22,10 @@ PM_MEMORY_PATH = Path(__file__).resolve().parent / "pm_memory.md"
 PM_MEMORY_MAX_ENTRIES = int(os.getenv("PM_MEMORY_MAX_ENTRIES", "30"))
 PM_MEMORY_MAX_CHARS = int(os.getenv("PM_MEMORY_MAX_CHARS", "1200"))
 
+ROLE_PROFILE_ROOT = Path(__file__).resolve().parent.parent / "developers"
+PM_TEAM_PROFILE_MAX_CHARS = int(os.getenv("PM_TEAM_PROFILE_MAX_CHARS", "2400"))
+PROJECTS_ROOT = os.getenv("PROJECTS_ROOT", "/root/projects")
+
 
 def _read_pm_memory() -> str:
     """Load recent PM memory entries for injection into system prompt."""
@@ -106,6 +110,38 @@ INCIDENT_DEVOPS_HINTS = (
     "порт",
     "деплой",
 )
+
+
+def _load_team_capabilities() -> str:
+    """Extract Tech Stack sections from developer profiles for PM context."""
+    parts: list[str] = []
+    for role in ("frontend", "backend", "devops", "qa"):
+        profile_path = ROLE_PROFILE_ROOT / role / "profile.md"
+        if not profile_path.exists():
+            continue
+        try:
+            text = profile_path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        section_lines: list[str] = []
+        in_section = False
+        for line in text.splitlines():
+            if re.match(r"^#{1,3}\s+Tech Stack", line):
+                in_section = True
+                continue
+            if in_section:
+                if re.match(r"^#{1,3}\s+", line):
+                    break
+                section_lines.append(line)
+        stack = "\n".join(section_lines).strip()
+        if not stack and text:
+            stack = text.strip()[:400]
+        if stack:
+            parts.append(f"[{role.upper()}]\n{stack}")
+    result = "\n\n".join(parts)
+    if len(result) > PM_TEAM_PROFILE_MAX_CHARS:
+        result = result[:PM_TEAM_PROFILE_MAX_CHARS] + "\n...[truncated]"
+    return result
 
 
 def _parse_json_maybe(text: str) -> dict[str, Any]:
@@ -253,6 +289,10 @@ def _normalize_tasks(raw_tasks: list[Any], task: dict[str, Any], roles: dict[str
 
         acceptance = str(raw.get("acceptance_criteria") or raw.get("acceptance") or "").strip()
 
+        # Sequential pipeline fields
+        template_id = str(raw.get("id") or f"t{idx}").strip()
+        depends_on = [str(d).strip() for d in (raw.get("depends_on") or []) if str(d).strip()]
+
         key = (role, title.lower())
         if key in seen:
             continue
@@ -260,12 +300,14 @@ def _normalize_tasks(raw_tasks: list[Any], task: dict[str, Any], roles: dict[str
 
         normalized.append(
             {
+                "id": template_id,
                 "title": title,
                 "description": description,
                 "role": role,
                 "mode": mode,
                 "command": command,
                 "acceptance_criteria": acceptance,
+                "depends_on": depends_on,
             }
         )
 
@@ -380,7 +422,7 @@ def _ensure_fix_role_for_qa_only(
     return tasks[:MAX_PM_SUBTASKS]
 
 
-def _plan_with_ai(task: dict[str, Any], roles: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
+def _plan_with_ai(task: dict[str, Any], roles: dict[str, Any]) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
     role_items = {
         role: {
             "label": cfg.get("label", role),
@@ -389,39 +431,65 @@ def _plan_with_ai(task: dict[str, Any], roles: dict[str, Any]) -> tuple[str, lis
         for role, cfg in roles.items()
     }
 
+    team_caps = _load_team_capabilities()
+    team_block = f"\n## Возможности команды (Tech Stack по ролям)\n{team_caps}\n" if team_caps else ""
+
     memory_block = _read_pm_memory()
     memory_section = (
-        f"\nПамять PM (прошлые задачи — дата|название|роли|итог):\n{memory_block}\n"
+        f"\n## Память PM (прошлые задачи — дата|название|роли|итог)\n{memory_block}\n"
         if memory_block
         else ""
     )
 
     system_prompt = (
-        "Ты технический project manager/директор разработки. "
-        "Нужно декомпозировать одну входную задачу на подзадачи для ролей frontend/backend/devops/qa.\n"
-        "Правила:\n"
+        "Ты технический Project Manager и директор разработки.\n"
+        "Твоя задача: декомпозировать входную задачу, выбрать tech stack, назначить workdir и создать граф задач с зависимостями.\n"
+        f"{team_block}"
+        "\n## Обязательные шаги планирования\n"
+        "1. **Workdir**: придумай slug проекта (kebab-case, до 30 символов) и сформируй путь: "
+        f'workdir="{PROJECTS_ROOT}/{{slug}}". Например: "{PROJECTS_ROOT}/landing-agency-2024".\n'
+        "2. **Tech Stack**: выбери стек для каждой роли исходя из возможностей команды выше и типа задачи. "
+        "Укажи в `tech_stack` и **вставь явно в description каждой задачи** — агент должен знать на чём писать.\n"
+        "3. **Граф зависимостей**: присвой каждой задаче уникальный `id` (t1, t2...) и заполни `depends_on`.\n"
+        "   Типовой порядок:\n"
+        "   - devops_setup: depends_on=[] (параллельно с frontend scaffold)\n"
+        "   - frontend_scaffold: depends_on=[]\n"
+        "   - backend: depends_on=[frontend_scaffold_id] (знает структуру фронта)\n"
+        "   - frontend_integrate: depends_on=[backend_id] (подключает API)\n"
+        "   - qa: depends_on=[frontend_integrate_id, devops_setup_id] (тестирует всё вместе)\n"
+        "4. **Описание задач**: каждая задача должна содержать: стек, workdir, что конкретно реализовать, "
+        "что ожидается от роли-зависимости.\n"
+        "\n## Правила\n"
         "- Верни только JSON.\n"
         "- Максимум 6 подзадач.\n"
         "- Выбирай только доступные роли.\n"
-        "- По возможности делай параллельные подзадачи по разным ролям.\n"
-        "- mode обычно ai. mode=command указывай только если есть конкретная безопасная команда.\n"
-        "- Не используй mode=manual для PM-подзадач.\n"
-        "- Для каждой подзадачи дай четкий title/description/acceptance_criteria.\n"
+        "- mode=ai (по умолчанию), mode=command только для конкретной безопасной shell-команды.\n"
+        "- Не используй mode=manual.\n"
         f"{memory_section}"
     )
 
     payload = {
         "task": task,
         "available_roles": role_items,
+        "projects_root": PROJECTS_ROOT,
         "expected_json_schema": {
-            "summary": "short summary",
+            "workdir": f"{PROJECTS_ROOT}/project-slug",
+            "tech_stack": {
+                "frontend": "React + Vite + Tailwind",
+                "backend": "Node.js Express",
+                "devops": "PM2 + nginx",
+                "qa": "curl + bash scripts",
+            },
+            "summary": "краткое описание плана",
             "tasks": [
                 {
+                    "id": "t1",
                     "title": "...",
-                    "description": "...",
+                    "description": "Стек: React+Vite+Tailwind. Workdir: /root/projects/slug. Реализовать...",
                     "role": "frontend|backend|devops|qa",
                     "mode": "ai|command",
-                    "command": "optional shell command",
+                    "command": "optional",
+                    "depends_on": [],
                     "acceptance_criteria": "...",
                 }
             ],
@@ -445,14 +513,17 @@ def _plan_with_ai(task: dict[str, Any], roles: dict[str, Any]) -> tuple[str, lis
         raise RuntimeError("PM planner returned no valid subtasks")
 
     summary = str(decision.get("summary", "")).strip() or "AI PM plan generated"
-    return summary, tasks
+    workdir = str(decision.get("workdir", "")).strip()
+    tech_stack = decision.get("tech_stack") if isinstance(decision.get("tech_stack"), dict) else {}
+    extra = {"workdir": workdir, "tech_stack": tech_stack}
+    return summary, tasks, extra
 
 
 def plan_pm_task(task: dict[str, Any], roles: dict[str, Any]) -> tuple[str, str, list[dict[str, Any]], dict[str, Any]]:
     errors: list[str] = []
 
     try:
-        summary, tasks = _plan_with_ai(task, roles)
+        summary, tasks, extra = _plan_with_ai(task, roles)
         return (
             "planned",
             f"AI планирование: {summary}",
@@ -462,6 +533,8 @@ def plan_pm_task(task: dict[str, Any], roles: dict[str, Any]) -> tuple[str, str,
                 "model": DEFAULT_MODEL,
                 "errors": errors,
                 "summary": summary,
+                "workdir": extra.get("workdir", ""),
+                "tech_stack": extra.get("tech_stack", {}),
             },
         )
     except Exception as exc:
@@ -479,6 +552,8 @@ def plan_pm_task(task: dict[str, Any], roles: dict[str, Any]) -> tuple[str, str,
                 "model": DEFAULT_MODEL,
                 "errors": errors,
                 "summary": summary,
+                "workdir": "",
+                "tech_stack": {},
             },
         )
 
@@ -491,5 +566,7 @@ def plan_pm_task(task: dict[str, Any], roles: dict[str, Any]) -> tuple[str, str,
             "model": DEFAULT_MODEL,
             "errors": errors,
             "summary": summary,
+            "workdir": "",
+            "tech_stack": {},
         },
     )

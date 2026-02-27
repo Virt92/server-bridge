@@ -23,7 +23,7 @@ PM_QA_GATE_ENABLED = str(os.getenv("PM_QA_GATE_ENABLED", "1")).strip().lower() n
 }
 
 PM_PENDING_STATES = {"incoming", "queued", "in_progress", "missing"}
-PM_ACTIVE_STAGES = {"qa_gate", "implementation", "qa_recheck"}
+PM_ACTIVE_STAGES = {"qa_gate", "implementation", "qa_recheck", "sequential"}
 
 PM_FIX_ROLE_KEYWORDS: dict[str, tuple[str, ...]] = {
     "frontend": (
@@ -153,8 +153,12 @@ def _normalize_pm_subtask_template(parent_title: str, parent_description: str, i
     title = str(subtask.get("title") or f"{parent_title} / шаг {idx}")
     description = str(subtask.get("description") or parent_description or "")
     acceptance = str(subtask.get("acceptance_criteria") or "")
+    template_id = str(subtask.get("id") or f"t{idx}").strip()
+    depends_on = [str(d).strip() for d in (subtask.get("depends_on") or []) if str(d).strip()]
     return {
         "template_step": idx,
+        "template_id": template_id,
+        "depends_on": depends_on,
         "title": title,
         "description": description,
         "role": role,

@@ -28,16 +28,32 @@ ROLE_PROFILE_ROOT = BASE_DIR / "developers"
 
 ROLE_BRIEF = {
     "frontend": (
-        "Ты senior frontend developer. Фокус: UI, верстка, компоненты, состояние, доступность."
+        "Ты senior frontend developer.\n"
+        "Специализация: UI-компоненты, верстка, клиентская логика, роутинг, состояние, доступность.\n"
+        "Discovery-приоритеты: найди package.json (стек/версии), структуру src/, существующие компоненты и стили.\n"
+        "Не создавай то, что уже есть. Проверяй фреймворк и соглашения проекта перед написанием кода.\n"
+        "После изменений: проверяй синтаксис (lint/tsc если доступно) или хотя бы cat изменённого файла."
     ),
     "backend": (
-        "Ты senior backend developer. Фокус: API, БД, безопасность, производительность и стабильность."
+        "Ты senior backend developer.\n"
+        "Специализация: REST/GraphQL API, БД, бизнес-логика, аутентификация, производительность, надёжность.\n"
+        "Discovery-приоритеты: найди существующие роуты/эндпоинты, схему БД, middleware, конфиги окружения.\n"
+        "Не дублируй существующую логику. Проверяй схему перед миграциями. Проверяй API через curl после правок.\n"
+        "Root-cause thinking: проблема скорее в коде, чем в тестах."
     ),
     "devops": (
-        "Ты senior devops engineer. Фокус: CI/CD, контейнеры, запуск, мониторинг, инфраструктура."
+        "Ты senior DevOps/SRE engineer.\n"
+        "Специализация: CI/CD, Docker, PM2/systemd, nginx/Caddy, мониторинг, деплой, инфраструктура.\n"
+        "Discovery-приоритеты: проверь запущенные сервисы (ps/pm2/systemctl), занятые порты, текущие конфиги.\n"
+        "Действуй non-destructively: сначала диагностика и чтение конфигов, потом минимальное изменение.\n"
+        "Проверяй доступность сервисов через curl/nc после изменений."
     ),
     "qa": (
-        "Ты senior QA engineer. Фокус: тесты, регрессия, воспроизводимость дефектов, покрытие."
+        "Ты senior QA engineer.\n"
+        "Специализация: тест-планирование, smoke/regression, воспроизведение дефектов, автоматизация тестов.\n"
+        "Discovery-приоритеты: найди что тестировать (endpoints, UI flows, конфиги, порты сервисов).\n"
+        "Тестируй реально через curl/http-запросы, не теоретически. Проверяй статус-коды и содержимое ответов.\n"
+        "В note всегда: что проверено, конкретные URL/файлы/строки, итоговый verdict."
     ),
 }
 
@@ -70,13 +86,48 @@ DISCOVERY_PREFIXES = (
     "rg ",
     "grep ",
     "git status",
+    "git log",
+    "git diff",
+    "git branch",
     "git grep",
+    "git show",
     "cat ",
     "sed -n",
     "head ",
     "tail ",
     "wc ",
     "tree",
+    "echo ",
+    "env",
+    "printenv",
+    "which ",
+    "type ",
+    "file ",
+    "stat ",
+    "diff ",
+    "curl -s",
+    "curl --silent",
+    "curl --head",
+    "wget -q",
+    "wget --spider",
+    "ps ",
+    "pgrep",
+    "netstat",
+    "ss ",
+    "lsof",
+    "df ",
+    "du ",
+    "jq ",
+    "python3 -c",
+    "python3 --version",
+    "python --version",
+    "node --version",
+    "node -e",
+    "npm list",
+    "pip list",
+    "pip show",
+    "nc -z",
+    "nc -w",
 )
 
 DISCOVERY_FORBIDDEN_TOKENS = (
@@ -344,51 +395,70 @@ def _build_messages(
     change_request = _extract_change_request(task)
     reference_context = _load_reference_task_context(task)
 
-    profile_block = ""
-    if role_profile:
-        profile_block = f"\nПрофиль роли:\n{role_profile}\n"
+    profile_block = f"\n## Профиль роли\n{role_profile}\n" if role_profile else ""
 
     change_scope_block = ""
     if _has_change_scope(task):
         change_scope_block = (
-            "\nЭто задача на доработку существующего функционала.\n"
-            "- Не переписывай модуль целиком; делай минимальный целевой diff.\n"
-            "- Первый шаг обязан быть discovery-only: только read-only команды (rg/find/ls/cat/git status и т.п.).\n"
-            "- После discovery меняй только релевантные файлы в scope задачи.\n"
+            "\n## Scope доработки\n"
+            "Это задача на изменение существующего функционала.\n"
+            "- Делай минимальный целевой diff — не переписывай модуль целиком.\n"
+            "- Меняй только файлы, указанные в change_request.target_paths.\n"
         )
 
     strategy_block = ""
     if strategy == "apply_only":
         strategy_block = (
-            "\nРежим apply_only:\n"
-            "- Минимизируй рассуждения и итерации.\n"
+            "\n## Режим apply_only\n"
             "- После discovery сразу переходи к точечным правкам и проверке.\n"
+            "- Минимум промежуточных шагов.\n"
         )
 
     qa_verdict_block = ""
     if role == "qa":
         qa_verdict_block = (
-            "\nДополнительные правила QA verdict:\n"
-            "- Если найден дефект (включая недоступность URL/API, неверный статус-код, broken flow), верни decision=blocked.\n"
-            "- decision=done используй только когда проверки пройдены и дефекты не обнаружены.\n"
-            "- В note кратко укажи что именно проверено и итоговый verdict.\n"
+            "\n## QA Verdict rules\n"
+            "- decision=blocked: найден дефект (недоступность URL/API, неверный статус-код, broken flow, assertion fail).\n"
+            "- decision=done: все проверки пройдены, дефекты не обнаружены.\n"
+            "- note обязан содержать: что проверено, результат каждой проверки, итоговый verdict.\n"
+            "- Указывай конкретные URL, статус-коды, файлы и строки где найден дефект.\n"
         )
 
     system_prompt = (
         f"{role_prompt}\n"
         f"{profile_block}"
+        "## Рабочий процесс\n"
+        "\n"
+        "### Шаг 1 — DISCOVERY (обязательно для каждой задачи)\n"
+        "Изучи рабочую директорию ДО любых изменений.\n"
+        "Разрешены ТОЛЬКО read-only команды: ls, find, rg, grep, cat, head, tail, git status, git log, git diff, curl -s, ps, env, stat, wc, tree, diff, jq, which.\n"
+        "Цель: понять структуру проекта, найти нужные файлы, убедиться что не дублируешь существующее.\n"
+        "\n"
+        "### Шаг 2+ — EXECUTION\n"
+        "На основе данных discovery делай точечные изменения.\n"
+        "После каждого изменения проверяй результат: git diff, cat изменённого файла, curl к API.\n"
+        "\n"
+        "## Правила\n"
+        "\n"
+        "**Безопасность:**\n"
+        "- Только неинтерактивные shell-команды.\n"
+        "- Запрещено: rm, sudo, reboot, shutdown, dd, mkfs, git reset --hard, git checkout --, curl|bash.\n"
+        "- Read-only команды (cat, curl -s, grep) разрешены вне workdir.\n"
+        "- Write-операции — только внутри workdir.\n"
+        "\n"
+        "**Эффективность:**\n"
+        "- Максимум 3 команды за шаг; группируй независимые команды в один шаг.\n"
+        "- Не повторяй одну и ту же команду дважды.\n"
+        "- Не переписывай модули целиком — минимальный целевой diff.\n"
+        "\n"
+        "**Качество note:**\n"
+        "- Указывай конкретные файлы и строки: 'исправлено src/api.py:87', 'ошибка в config/nginx.conf:14'.\n"
+        "- decision=done — только когда задача реально завершена и результат проверен.\n"
+        "- decision=blocked — чёткая причина: что именно мешает, что нужно для продолжения.\n"
         f"{change_scope_block}"
         f"{strategy_block}"
         f"{qa_verdict_block}"
-        "Ты работаешь как автономный агент.\n"
-        "Правила:\n"
-        "- Только неинтерактивные shell-команды.\n"
-        "- Работай только внутри workdir.\n"
-        "- Не используй опасные команды.\n"
-        "- За шаг давай максимум 3 команды.\n"
-        "- Если задачу можно завершить, верни decision=done.\n"
-        "- Если не можешь продолжать, верни decision=blocked и причину.\n"
-        "Ответ только JSON.\n"
+        "\nОтвет строго JSON.\n"
     )
 
     user_prompt = {
@@ -399,7 +469,7 @@ def _build_messages(
         "reference_task": reference_context,
         "expected_json_schema": {
             "decision": "run | done | blocked",
-            "note": "short text",
+            "note": "краткий итог шага; при ссылке на код указывай file.py:line",
             "commands": ["shell command 1", "shell command 2"],
         },
     }
@@ -548,14 +618,15 @@ def run_ai_task(role: str, task: dict[str, Any], logs_dir: Path) -> tuple[str, s
             transcript["steps"].append(step_payload)
             break
 
-        if has_change_scope and step == 1:
-            if not all(_looks_like_discovery_command(cmd) for cmd in commands[:MAX_COMMANDS_PER_STEP]):
+        if step == 1:
+            non_discovery = [cmd for cmd in commands[:MAX_COMMANDS_PER_STEP] if not _looks_like_discovery_command(cmd)]
+            if non_discovery:
                 final_status = "blocked"
-                final_note = "Для scoped-доработки первый шаг должен быть discovery-only командами"
+                final_note = f"Шаг 1 должен содержать только read-only команды (discovery). Нарушение: {non_discovery[0]!r}"
                 step_payload["guard"] = {
                     "rule": "first_step_discovery_only",
                     "blocked": True,
-                    "commands": commands[:MAX_COMMANDS_PER_STEP],
+                    "offending_commands": non_discovery,
                 }
                 transcript["steps"].append(step_payload)
                 break
