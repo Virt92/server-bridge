@@ -128,10 +128,19 @@ DISCOVERY_PREFIXES = (
     "pip show",
     "nc -z",
     "nc -w",
+    "pm2 list",
+    "pm2 show",
+    "pm2 describe",
+    "pm2 status",
+    "pm2 logs",
+    "nginx -t",
+    "systemctl status",
+    "service ",
+    "journalctl",
 )
 
 DISCOVERY_FORBIDDEN_TOKENS = (
-    ">",
+    " >",   # file write redirect (2>/dev/null and 2>&1 are allowed)
     "| tee",
     " mv ",
     " cp ",
@@ -171,7 +180,9 @@ def _looks_like_discovery_command(cmd: str) -> bool:
     if not lowered:
         return False
 
-    if "&&" in lowered or ";" in lowered:
+    # Allow \; (find -exec terminator) but block real command chaining (; && ||)
+    chaining_check = lowered.replace("\\;", "")
+    if "&&" in chaining_check or ";" in chaining_check or "||" in chaining_check:
         return False
 
     if any(token in lowered for token in DISCOVERY_FORBIDDEN_TOKENS):

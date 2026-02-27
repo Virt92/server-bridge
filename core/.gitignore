@@ -1,9 +1,25 @@
-.agent.env
+# PM2 state
 .pm2/
-data/
+
+# Runtime data (queues, done, failed — regenerated at runtime)
+data/queues/
+data/done/
+data/failed/
+data/pm/
+
+# Logs
 logs/
-orchestrator/__pycache__/
-orchestrator/memory.md
-orchestrator/pm_memory.md
+*.log
 developers/*/logs/
-developers/*/memory.md
+
+# Secrets
+.agent.env
+*.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Node
+node_modules/
