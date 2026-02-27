@@ -42,18 +42,26 @@ ROLE_BRIEF = {
         "Root-cause thinking: проблема скорее в коде, чем в тестах."
     ),
     "devops": (
-        "Ты senior DevOps/SRE engineer.\n"
+        "Ты senior DevOps/SRE engineer. Сервер: 91.99.201.99.\n"
         "Специализация: CI/CD, Docker, PM2/systemd, nginx/Caddy, мониторинг, деплой, инфраструктура.\n"
-        "Discovery-приоритеты: проверь запущенные сервисы (ps/pm2/systemctl), занятые порты, текущие конфиги.\n"
+        "Discovery-приоритеты: проверь запущенные сервисы (ps/pm2/systemctl), занятые порты (ss -tlnp), текущие конфиги.\n"
         "Действуй non-destructively: сначала диагностика и чтение конфигов, потом минимальное изменение.\n"
-        "Проверяй доступность сервисов через curl/nc после изменений."
+        "ОБЯЗАТЕЛЬНО при деплое на любой порт PORT:\n"
+        "  1. ufw allow PORT/tcp  — открыть порт в файрволе\n"
+        "  2. Убедиться что PM2 процесс online\n"
+        "  3. Проверить curl http://91.99.201.99:PORT — именно внешний IP, не localhost\n"
+        "Без открытия UFW порт недоступен снаружи — это критическая часть деплоя."
     ),
     "qa": (
-        "Ты senior QA engineer.\n"
+        "Ты senior QA engineer. Сервер: 91.99.201.99.\n"
         "Специализация: тест-планирование, smoke/regression, воспроизведение дефектов, автоматизация тестов.\n"
         "Discovery-приоритеты: найди что тестировать (endpoints, UI flows, конфиги, порты сервисов).\n"
-        "Тестируй реально через curl/http-запросы, не теоретически. Проверяй статус-коды и содержимое ответов.\n"
-        "В note всегда: что проверено, конкретные URL/файлы/строки, итоговый verdict."
+        "ОБЯЗАТЕЛЬНЫЕ проверки для каждого веб-сервиса:\n"
+        "  1. curl http://127.0.0.1:PORT — локальная доступность\n"
+        "  2. curl http://91.99.201.99:PORT — внешняя доступность (через публичный IP!)\n"
+        "  3. Если внешний недоступен — проверь ufw status и сообщи об этом\n"
+        "Тестируй реально через curl, не теоретически. Проверяй статус-коды и содержимое ответов.\n"
+        "В note всегда: что проверено, конкретные URL, HTTP-коды, итоговый verdict."
     ),
 }
 
@@ -122,8 +130,14 @@ DISCOVERY_PREFIXES = (
     "python3 --version",
     "python --version",
     "node --version",
+    "node -v",
     "node -e",
+    "npm --version",
+    "npm -v",
     "npm list",
+    "npm run",
+    "npx --version",
+    "npx -v",
     "pip list",
     "pip show",
     "nc -z",
@@ -442,7 +456,8 @@ def _build_messages(
         "\n"
         "### Шаг 1 — DISCOVERY (обязательно для каждой задачи)\n"
         "Изучи рабочую директорию ДО любых изменений.\n"
-        "Разрешены ТОЛЬКО read-only команды: ls, find, rg, grep, cat, head, tail, git status, git log, git diff, curl -s, ps, env, stat, wc, tree, diff, jq, which.\n"
+        "Разрешены ТОЛЬКО read-only команды: ls, find, rg, grep, cat, head, tail, git status, git log, git diff, curl -s, ps, env, stat, wc, tree, diff, jq, which, pm2 list, pm2 show, pm2 describe, nginx -t, systemctl status.\n"
+        "ЗАПРЕЩЕНО в шаге 1: && || ; (command chaining). Каждая команда — отдельно. НЕ пиши 'ls /path || echo ...' — пиши просто 'ls /path'.\n"
         "Цель: понять структуру проекта, найти нужные файлы, убедиться что не дублируешь существующее.\n"
         "\n"
         "### Шаг 2+ — EXECUTION\n"
