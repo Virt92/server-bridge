@@ -29,6 +29,10 @@ while true; do
 
     # ── 2. Commit + push if anything changed ─────────────────────────────────
     cd "$REPO"
+
+    # Untrack files that are now gitignored but were previously committed
+    git ls-files --ignored --exclude-standard -c -z | xargs -0 --no-run-if-empty git rm --cached --quiet -- 2>/dev/null || true
+
     git add -A
 
     if ! git diff --staged --quiet; then
