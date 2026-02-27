@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CORE_DIR="/root/core"
+PM2_CMD="${CORE_DIR}/pm2-core"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+AGENT_ENV_FILE="${AGENT_ENV_FILE:-${CORE_DIR}/.agent.env}"
+
+load_agent_env() {
+  if [[ -f "${AGENT_ENV_FILE}" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "${AGENT_ENV_FILE}"
+    set +a
+  fi
+}
+
+usage() {
+  cat <<'USAGE'
+agent - orchestration helper
+
+Usage:
+  agent                      Ensure orchestrator+agents are running and show status
+  agent up                   Start/resume orchestrator+agents
+  agent status               Show queue board and PM2 process table
+  agent task <args>          Submit task (passes args to submit_task.py)
+  agent amend <args>         Submit scoped follow-up task (change_type=fix)
+  agent pm <args>            Submit director-level PM task (mode=pm)
+  agent ai <args>            Manage per-role AI routing (list/set/show/reset)
+  agent logs [name]          Tail PM2 logs (all or one process)
+  agent down                 Stop and remove orchestrator PM2 apps
+  agent restart              Restart orchestrator PM2 apps
+  agent help                 Show this help
+
+Examples:
+  agent
+  agent status
+  agent task --title "API smoke" --role backend --mode command --command "npm run test:api" --workdir /root/my-project
+  agent amend --title "fix login edge case" --role backend --workdir /root/my-project --ref-task task-abc123 --target-path src/auth --max-files-changed 3
+  agent pm --title "Новый релиз" --description "UI + API + deploy + тесты" --workdir /root/my-project
+  agent ai list
+  agent ai set frontend --model codex-code --strategy apply_only
+USAGE
+}
+
+run_in_core() {
+  (cd "${CORE_DIR}" && "$@")
+}
+
+required_online() {
+  run_in_core "${PM2_CMD}" jlist | "${PYTHON_BIN}" -c '
+import json
+import sys
+required = {"orch-main", "agent-frontend", "agent-backend", "agent-devops", "agent-qa"}
+try:
+    items = json.load(sys.stdin)
+except Exception:
+    print("no")
+    raise SystemExit(0)
+status_map = {item.get("name"): item.get("pm2_env", {}).get("status") for item in items}
+ok = all(status_map.get(name) == "online" for name in required)
+print("yes" if ok else "no")
+'
+}
+
+start_stack() {
+  load_agent_env
+  if [[ "$(required_online)" == "yes" ]]; then
+    echo "orchestrator stack already online"
+    return 0
+  fi
+  run_in_core "${PM2_CMD}" start ecosystem.config.cjs
+}
+
+show_status() {
+  run_in_core "${PYTHON_BIN}" orchestrator/status_board.py
+  echo "--- pm2 ---"
+  run_in_core "${PM2_CMD}" ls
+}
+
+cmd="${1:-}"
+
+case "${cmd}" in
+  "")
+    start_stack
+    show_status
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  up)
+    start_stack
+    ;;
+  status)
+    show_status
+    ;;
+  task)
+    shift
+    run_in_core "${PYTHON_BIN}" orchestrator/submit_task.py "$@"
+    ;;
+  amend)
+    shift
+    run_in_core "${PYTHON_BIN}" orchestrator/submit_task.py --change-type fix "$@"
+    ;;
+  pm|director)
+    shift
+    run_in_core "${PYTHON_BIN}" orchestrator/submit_task.py --mode pm "$@"
+    ;;
+  ai)
+    shift
+    run_in_core "${PYTHON_BIN}" orchestrator/role_ai.py "$@"
+    ;;
+  logs)
+    if [[ $# -ge 2 ]]; then
+      run_in_core "${PM2_CMD}" logs "$2"
+    else
+      run_in_core "${PM2_CMD}" logs
+    fi
+    ;;
+  down)
+    run_in_core "${PM2_CMD}" stop ecosystem.config.cjs || true
+    run_in_core "${PM2_CMD}" delete ecosystem.config.cjs || true
+    ;;
+  restart)
+    load_agent_env
+    run_in_core "${PM2_CMD}" restart ecosystem.config.cjs --update-env
+    ;;
+  *)
+    echo "Unknown subcommand: ${cmd}" >&2
+    usage >&2
+    exit 1
+    ;;
+esac

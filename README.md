@@ -1,6 +1,8 @@
 # server-bridge
 
-Minimal HTTP bridge service with health endpoints and a JSON echo route.
+Monorepo with:
+- `server-bridge` HTTP service (root)
+- `core/` orchestrator and multi-agent runtime
 
 ## Endpoints
 
@@ -19,6 +21,11 @@ npm start
 ```
 
 Default server URL: `http://127.0.0.1:3000`
+
+## Repository Layout
+
+- `src/`, `test/` - bridge service code and tests
+- `core/` - orchestrator codebase imported from runtime environment (without secrets/runtime state)
 
 ## Example Request
 

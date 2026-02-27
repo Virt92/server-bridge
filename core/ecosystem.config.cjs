@@ -1,0 +1,100 @@
+const sharedEnv = {
+  PYTHONUNBUFFERED: '1',
+};
+
+const optionalEnvKeys = [
+  'OPENAI_API_KEY',
+  'OPENAI_BASE_URL',
+  'AI_PROVIDER',
+  'AI_MODEL',
+  'AI_MAX_STEPS',
+  'AI_MAX_COMMANDS_PER_STEP',
+  'AI_CMD_OUTPUT_CHARS',
+  'AI_COMMAND_TIMEOUT_SEC',
+  'AI_ROLE_PROFILE_CHARS',
+  'PM_MODEL',
+  'PM_MAX_SUBTASKS',
+  'AI_PROVIDER_FRONTEND',
+  'AI_PROVIDER_BACKEND',
+  'AI_PROVIDER_DEVOPS',
+  'AI_PROVIDER_QA',
+  'AI_PROVIDER_PM',
+  'AI_MODEL_FRONTEND',
+  'AI_MODEL_BACKEND',
+  'AI_MODEL_DEVOPS',
+  'AI_MODEL_QA',
+  'AI_MODEL_PM',
+  'AI_STRATEGY_FRONTEND',
+  'AI_STRATEGY_BACKEND',
+  'AI_STRATEGY_DEVOPS',
+  'AI_STRATEGY_QA',
+  'AI_STRATEGY_PM',
+  'OPENAI_API_KEY_FRONTEND',
+  'OPENAI_API_KEY_BACKEND',
+  'OPENAI_API_KEY_DEVOPS',
+  'OPENAI_API_KEY_QA',
+  'OPENAI_API_KEY_PM',
+  'OPENAI_BASE_URL_FRONTEND',
+  'OPENAI_BASE_URL_BACKEND',
+  'OPENAI_BASE_URL_DEVOPS',
+  'OPENAI_BASE_URL_QA',
+  'OPENAI_BASE_URL_PM',
+];
+
+for (const key of optionalEnvKeys) {
+  if (process.env[key]) {
+    sharedEnv[key] = process.env[key];
+  }
+}
+
+module.exports = {
+  apps: [
+    {
+      name: 'orch-main',
+      script: 'python3',
+      args: 'orchestrator/orchestrator.py',
+      cwd: '/root/core',
+      autorestart: true,
+      watch: false,
+      max_restarts: 20,
+      restart_delay: 2000,
+      env: sharedEnv,
+    },
+    {
+      name: 'agent-frontend',
+      script: 'python3',
+      args: 'orchestrator/agent_worker.py frontend',
+      cwd: '/root/core',
+      autorestart: true,
+      watch: false,
+      env: sharedEnv,
+    },
+    {
+      name: 'agent-backend',
+      script: 'python3',
+      args: 'orchestrator/agent_worker.py backend',
+      cwd: '/root/core',
+      autorestart: true,
+      watch: false,
+      env: sharedEnv,
+    },
+    {
+      name: 'agent-devops',
+      script: 'python3',
+      args: 'orchestrator/agent_worker.py devops',
+      cwd: '/root/core',
+      autorestart: true,
+      watch: false,
+      env: sharedEnv,
+    },
+    {
+      name: 'agent-qa',
+      script: 'python3',
+      args: 'orchestrator/agent_worker.py qa',
+      cwd: '/root/core',
+      autorestart: true,
+      watch: false,
+      env: sharedEnv,
+    },
+  ],
+};

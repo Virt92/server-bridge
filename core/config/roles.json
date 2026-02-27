@@ -1,0 +1,18 @@
+{
+  "frontend": {
+    "label": "Frontend Developer",
+    "keywords": ["frontend", "ui", "ux", "css", "html", "react", "vue", "next", "layout", "page", "client"]
+  },
+  "backend": {
+    "label": "Backend Developer",
+    "keywords": ["backend", "api", "server", "database", "db", "auth", "endpoint", "migration", "redis", "queue"]
+  },
+  "devops": {
+    "label": "DevOps Engineer",
+    "keywords": ["devops", "deploy", "docker", "kubernetes", "ci", "cd", "nginx", "infra", "pm2", "monitoring"]
+  },
+  "qa": {
+    "label": "QA Engineer",
+    "keywords": ["qa", "test", "testing", "regression", "bug", "e2e", "unit", "integration", "check"]
+  }
+}
