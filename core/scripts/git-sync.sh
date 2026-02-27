@@ -20,7 +20,8 @@ while true; do
         --exclude='data/' \
         --exclude='logs/' \
         --exclude='.agent.env' \
-        --exclude='__pycache__/' \
+        --exclude='**/__pycache__/' \
+        --exclude='**/*.pyc' \
         --exclude='orchestrator/memory.md' \
         --exclude='orchestrator/pm_memory.md' \
         --exclude='developers/*/memory.md' \
