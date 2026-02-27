@@ -1,3 +1,24 @@
+// Load .agent.env directly so keys are available regardless of how PM2 daemon was started
+const fs = require('fs');
+const path = require('path');
+const agentEnvPath = path.join(__dirname, '.agent.env');
+if (fs.existsSync(agentEnvPath)) {
+  const lines = fs.readFileSync(agentEnvPath, 'utf8').split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx < 1) continue;
+    const key = trimmed.slice(0, eqIdx).trim();
+    let val = trimmed.slice(eqIdx + 1).trim();
+    // Strip surrounding quotes
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1);
+    }
+    if (key && val) process.env[key] = val;
+  }
+}
+
 const sharedEnv = {
   PYTHONUNBUFFERED: '1',
 };
