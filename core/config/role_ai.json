@@ -1,19 +1,19 @@
 {
   "frontend": {
-    "provider": "openai",
-    "model": "gpt-4o-mini"
+    "provider": "claude-cli",
+    "model": "claude-sonnet-4-6"
   },
   "backend": {
-    "provider": "openai",
-    "model": "gpt-4o-mini"
+    "provider": "claude-cli",
+    "model": "claude-sonnet-4-6"
   },
   "devops": {
-    "provider": "openai",
-    "model": "gpt-4o-mini"
+    "provider": "claude-cli",
+    "model": "claude-sonnet-4-6"
   },
   "qa": {
-    "provider": "openai",
-    "model": "gpt-4o-mini"
+    "provider": "claude-cli",
+    "model": "claude-sonnet-4-6"
   },
   "designer": {
     "provider": "openai",

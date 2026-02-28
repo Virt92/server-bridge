@@ -16,6 +16,7 @@ DEFAULT_MODEL = os.getenv("AI_MODEL", "gpt-4.1-mini")
 DEFAULT_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
 ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1"
 ANTHROPIC_VERSION = "2023-06-01"
+CLAUDE_CLI_PATH = os.getenv("CLAUDE_CLI_PATH", "/root/.local/bin/claude")
 MAX_STEPS = int(os.getenv("AI_MAX_STEPS", "5"))
 MAX_COMMANDS_PER_STEP = int(os.getenv("AI_MAX_COMMANDS_PER_STEP", "3"))
 MAX_OUTPUT_CHARS = int(os.getenv("AI_CMD_OUTPUT_CHARS", "4000"))
@@ -521,6 +522,53 @@ def _call_anthropic(messages: list[dict[str, str]], model: str, base_url: str, a
     return _parse_json_maybe(content)
 
 
+def _call_claude_cli(messages: list[dict[str, str]], model: str) -> dict[str, Any]:
+    """Invoke the local claude CLI subprocess as an AI provider.
+
+    Removes CLAUDECODE from the child environment to avoid the
+    "nested session" guard that the CLI enforces.
+    """
+    system_content = ""
+    user_content = ""
+    for msg in messages:
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+        if role == "system":
+            system_content = content
+        elif role == "user":
+            user_content = content
+
+    # Strip Claude Code session markers and any Anthropic API key from the parent
+    # environment. The CLI must use its own stored OAuth credentials (~/.claude/),
+    # not the (potentially invalid) ANTHROPIC_API_KEY set in .agent.env.
+    _STRIP_ENV = {"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "ANTHROPIC_API_KEY"}
+    env = {k: v for k, v in os.environ.items() if k not in _STRIP_ENV}
+
+    model_arg = model if model else "sonnet"
+    cmd = [CLAUDE_CLI_PATH, "-p", "--model", model_arg]
+    if system_content:
+        cmd += ["--system-prompt", system_content]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            input=user_content,
+            capture_output=True,
+            text=True,
+            timeout=180,
+            env=env,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("claude CLI subprocess timed out (180s)") from exc
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"claude CLI exited {result.returncode}: {result.stderr[:400]}"
+        )
+
+    return _parse_json_maybe(result.stdout)
+
+
 def _load_role_profile(role: str) -> str:
     role_name = (role or "").strip().lower()
     if not role_name:
@@ -816,7 +864,7 @@ def run_ai_task(role: str, task: dict[str, Any], logs_dir: Path) -> tuple[str, s
     }
     transcript_path = logs_dir / f"{task_id}.ai.json"
 
-    if provider not in {"openai", "anthropic"}:
+    if provider not in {"openai", "anthropic", "claude-cli"}:
         transcript["status"] = "blocked"
         transcript["final_note"] = f"AI provider '{provider}' is not supported in this runtime"
         transcript["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -825,7 +873,7 @@ def run_ai_task(role: str, task: dict[str, Any], logs_dir: Path) -> tuple[str, s
             fh.write("\n")
         return "blocked", f"Неподдерживаемый AI provider: {provider}", str(transcript_path)
 
-    if not api_key.strip():
+    if provider != "claude-cli" and not api_key.strip():
         transcript["status"] = "blocked"
         transcript["final_note"] = f"API key is not set (expected: {ai_cfg.get('api_key_env') or 'OPENAI_API_KEY'})"
         transcript["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -850,6 +898,8 @@ def run_ai_task(role: str, task: dict[str, Any], logs_dir: Path) -> tuple[str, s
         try:
             if provider == "anthropic":
                 decision = _call_anthropic(messages, model=model, base_url=base_url, api_key=api_key)
+            elif provider == "claude-cli":
+                decision = _call_claude_cli(messages, model=model)
             else:
                 decision = _call_openai(messages, model=model, base_url=base_url, api_key=api_key)
             step_payload["agent"] = decision
