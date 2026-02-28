@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -240,6 +241,36 @@ def qa_note_indicates_failure(note: str) -> bool:
     return not has_positive
 
 
+def _parse_task_created_ts(task: dict[str, Any]) -> float | None:
+    value = str(task.get("created_at") or "").strip()
+    if not value:
+        return None
+    try:
+        # canonical format in this project: 2026-02-28T01:49:36Z
+        dt = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    except Exception:
+        return None
+
+
+def _queue_sort_key(task_file: Path) -> tuple[float, str]:
+    # FIFO by logical task creation time; fallback to file mtime.
+    created_ts = None
+    try:
+        task = read_task(task_file)
+        created_ts = _parse_task_created_ts(task)
+    except Exception:
+        created_ts = None
+
+    if created_ts is None:
+        try:
+            created_ts = task_file.stat().st_mtime
+        except Exception:
+            created_ts = 0.0
+
+    return (created_ts, task_file.name)
+
+
 def process_one(role: str) -> None:
     queue_dir = DATA_DIR / "queues" / role
     done_dir = DATA_DIR / "done" / role
@@ -252,7 +283,7 @@ def process_one(role: str) -> None:
     failed_dir.mkdir(parents=True, exist_ok=True)
     logs_dir.mkdir(parents=True, exist_ok=True)
 
-    for task_file in sorted(queue_dir.glob("*.json")):
+    for task_file in sorted(queue_dir.glob("*.json"), key=_queue_sort_key):
         title = task_file.stem
         try:
             task = read_task(task_file)
