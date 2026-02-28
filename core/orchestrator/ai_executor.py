@@ -72,7 +72,18 @@ ROLE_BRIEF = {
         "  [код TypeScript/JavaScript]\n"
         "  ENDOFFILE\n"
         "Для установки пакета sqlite3: npm install sqlite3 --save (если нет в package.json)\n"
-        "После записи файла ВСЕГДА проверяй: cat /путь/к/файлу и убедись что содержимое верное."
+        "После записи файла ВСЕГДА проверяй: cat /путь/к/файлу и убедись что содержимое верное.\n"
+        "Для TypeScript проверки в Next.js проекте: npx tsc --noEmit (БЕЗ аргументов с именем файла!).\n"
+        "Запуск npx tsc --noEmit path/to/file.ts — ОШИБКА, так показывает ложные ошибки из node_modules/next/.\n"
+        "\n"
+        "ОБЯЗАТЕЛЬНЫЙ РАБОЧИЙ ПРОЦЕСС (нарушение = блокировка):\n"
+        "ШАГ 1 (ТОЛЬКО discovery/read-only): ls директорий, cat существующих файлов. НЕЛЬЗЯ писать файлы в шаге 1!\n"
+        "  Пример: ls /workdir/src/pages/api/\n"
+        "  Пример: cat /workdir/src/lib/existingFile.ts\n"
+        "ШАГ 2+: пиши файлы через cat heredoc, проверяй, тесть (npx tsc --noEmit)\n"
+        "ШАГ финальный: decision=done с note о том что создано/изменено\n"
+        "\n"
+        "❌ НЕЛЬЗЯ в шаге 1 писать файлы — это вызовет блокировку системой безопасности!"
     ),
     "devops": (
         "Ты senior DevOps/SRE engineer. Сервер: 91.99.201.99.\n"
@@ -686,7 +697,17 @@ def _build_messages(
         f"{change_scope_block}"
         f"{strategy_block}"
         f"{qa_verdict_block}"
-        "\nОтвет строго JSON.\n"
+        "\n## КРИТИЧЕСКИ ВАЖНО — ФОРМАТ ОТВЕТА\n"
+        "Возвращай СТРОГО JSON ТОЛЬКО с этими тремя полями:\n"
+        "{\n"
+        '  "decision": "run",\n'
+        '  "note": "краткий итог шага",\n'
+        '  "commands": ["bash команда 1", "bash команда 2"]\n'
+        "}\n"
+        "Допустимые значения decision: run (продолжаем, есть команды), done (задача завершена), blocked (заблокировано).\n"
+        "НЕ используй другие поля! НЕ пиши планы, дизайн-документы, 'Full files', 'API Routes', 'Runbook'!\n"
+        "Ты НЕ составляешь план — ты ВЫПОЛНЯЕШЬ shell-команды итерационно.\n"
+        "Каждый ответ = один шаг выполнения. Файлы пиши через cat heredoc в commands.\n"
     )
 
     user_prompt: dict[str, Any] = {
