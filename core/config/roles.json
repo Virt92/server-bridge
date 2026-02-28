@@ -14,5 +14,9 @@
   "qa": {
     "label": "QA Engineer",
     "keywords": ["qa", "test", "testing", "regression", "bug", "e2e", "unit", "integration", "check"]
+  },
+  "designer": {
+    "label": "UI/UX Designer",
+    "keywords": ["design", "designer", "ui", "ux", "style", "palette", "color", "font", "layout", "mockup", "brief"]
   }
 }
