@@ -822,6 +822,10 @@ def run_ai_task(role: str, task: dict[str, Any], logs_dir: Path) -> tuple[str, s
     final_note = "Достигнут лимит шагов"
     has_change_scope = _has_change_scope(task)
 
+    # Loop detection: track (commands_hash, error_output_hash) pairs
+    _loop_tracker: dict[str, int] = {}
+    _LOOP_LIMIT = 3  # Block if same command+error combo repeats 3+ times
+
     for step in range(1, MAX_STEPS + 1):
         history = transcript["steps"]
         messages = _build_messages(role, task, workdir, history, strategy)
@@ -916,6 +920,17 @@ def run_ai_task(role: str, task: dict[str, Any], logs_dir: Path) -> tuple[str, s
 
             result = _run_command(cmd, workdir, DEFAULT_COMMAND_TIMEOUT)
             step_payload["runs"].append(result)
+
+            # Loop detection: same command + same error output repeated 3 times → stop
+            stdout_snippet = str(result.get("stdout", ""))[:120]
+            loop_key = f"{cmd[:80]}|{stdout_snippet}"
+            _loop_tracker[loop_key] = _loop_tracker.get(loop_key, 0) + 1
+            if _loop_tracker[loop_key] >= _LOOP_LIMIT:
+                transcript["steps"].append(step_payload)
+                final_status = "blocked"
+                final_note = f"Обнаружен цикл: команда '{cmd[:60]}' повторяется с одним результатом. Смени подход."
+                blocked_by_guard = True
+                break
 
         transcript["steps"].append(step_payload)
         if blocked_by_guard:
