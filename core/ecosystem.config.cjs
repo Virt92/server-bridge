@@ -25,8 +25,10 @@ const sharedEnv = {
 
 const optionalEnvKeys = [
   'OPENAI_API_KEY',
+  'FAL_KEY',
   'ANTHROPIC_API_KEY',
   'OPENAI_BASE_URL',
+  'OPENAI_AUTH_SCHEME',
   'AI_PROVIDER',
   'AI_MODEL',
   'PM_MODEL',
@@ -63,6 +65,11 @@ const optionalEnvKeys = [
   'OPENAI_BASE_URL_DEVOPS',
   'OPENAI_BASE_URL_QA',
   'OPENAI_BASE_URL_PM',
+  'OPENAI_AUTH_SCHEME_FRONTEND',
+  'OPENAI_AUTH_SCHEME_BACKEND',
+  'OPENAI_AUTH_SCHEME_DEVOPS',
+  'OPENAI_AUTH_SCHEME_QA',
+  'OPENAI_AUTH_SCHEME_PM',
 ];
 
 for (const key of optionalEnvKeys) {

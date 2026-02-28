@@ -332,9 +332,27 @@ def _parse_json_maybe(text: str) -> dict[str, Any]:
         return json.loads(match.group(0))
 
 
+def _resolve_openai_auth(base_url: str, api_key: str) -> tuple[str, str]:
+    base_lower = base_url.lower()
+    fal_key = os.getenv("FAL_KEY", "").strip()
+    effective_key = api_key.strip()
+
+    # For fal OpenAI-compatible gateway, prefer dedicated FAL_KEY when provided.
+    if "fal.run" in base_lower and fal_key:
+        effective_key = fal_key
+
+    if not effective_key:
+        raise RuntimeError("OpenAI-compatible API key is not set")
+
+    auth_scheme = os.getenv("OPENAI_AUTH_SCHEME", "").strip()
+    if not auth_scheme:
+        auth_scheme = "Key" if "fal.run/openrouter/router/openai" in base_lower else "Bearer"
+
+    return auth_scheme, effective_key
+
+
 def _call_openai(messages: list[dict[str, str]], model: str, base_url: str, api_key: str) -> dict[str, Any]:
-    if not api_key.strip():
-        raise RuntimeError("OpenAI API key is not set")
+    auth_scheme, effective_key = _resolve_openai_auth(base_url, api_key)
 
     payload = {
         "model": model,
@@ -348,7 +366,7 @@ def _call_openai(messages: list[dict[str, str]], model: str, base_url: str, api_
         data=body,
         method="POST",
         headers={
-            "Authorization": f"Bearer {api_key}",
+            "Authorization": f"{auth_scheme} {effective_key}",
             "Content-Type": "application/json",
         },
     )

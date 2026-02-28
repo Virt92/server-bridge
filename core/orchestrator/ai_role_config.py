@@ -106,9 +106,16 @@ def resolve_role_ai_settings(
             ]
         )
 
+        is_fal_openai = provider == "openai" and "fal.run" in base_url.lower()
+        fal_key = os.getenv("FAL_KEY", "")
+
         if api_key_env and os.getenv(api_key_env):
             api_key = os.getenv(api_key_env, "")
             api_key_source = api_key_env
+        elif is_fal_openai and fal_key:
+            api_key = fal_key
+            api_key_source = "FAL_KEY"
+            api_key_env = "FAL_KEY"
         elif os.getenv(f"OPENAI_API_KEY_{role_upper}"):
             env_name = f"OPENAI_API_KEY_{role_upper}"
             api_key = os.getenv(env_name, "")

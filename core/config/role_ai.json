@@ -1,15 +1,15 @@
 {
   "frontend": {
     "provider": "openai",
-    "model": "gpt-4o"
+    "model": "gpt-4o-mini"
   },
   "backend": {
     "provider": "openai",
-    "model": "gpt-4o"
+    "model": "gpt-4o-mini"
   },
   "devops": {
     "provider": "openai",
-    "model": "gpt-4o"
+    "model": "gpt-4o-mini"
   },
   "qa": {
     "provider": "openai",
@@ -17,6 +17,6 @@
   },
   "designer": {
     "provider": "openai",
-    "model": "gpt-4o"
+    "model": "gpt-4o-mini"
   }
 }

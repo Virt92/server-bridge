@@ -158,10 +158,27 @@ def _parse_json_maybe(text: str) -> dict[str, Any]:
         return json.loads(match.group(0))
 
 
-def _call_openai(messages: list[dict[str, str]]) -> dict[str, Any]:
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+def _resolve_openai_auth(base_url: str) -> tuple[str, str]:
+    base_lower = base_url.lower()
+    fal_key = os.getenv("FAL_KEY", "").strip()
+
+    if "fal.run" in base_lower and fal_key:
+        api_key = fal_key
+    else:
+        api_key = os.getenv("OPENAI_API_KEY", "").strip()
+
     if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is not set")
+        raise RuntimeError("OpenAI-compatible API key is not set")
+
+    auth_scheme = os.getenv("OPENAI_AUTH_SCHEME", "").strip()
+    if not auth_scheme:
+        auth_scheme = "Key" if "fal.run/openrouter/router/openai" in base_lower else "Bearer"
+
+    return auth_scheme, api_key
+
+
+def _call_openai(messages: list[dict[str, str]]) -> dict[str, Any]:
+    auth_scheme, api_key = _resolve_openai_auth(DEFAULT_BASE_URL)
 
     payload = {
         "model": DEFAULT_MODEL,
@@ -175,7 +192,7 @@ def _call_openai(messages: list[dict[str, str]]) -> dict[str, Any]:
         data=json.dumps(payload).encode("utf-8"),
         method="POST",
         headers={
-            "Authorization": f"Bearer {api_key}",
+            "Authorization": f"{auth_scheme} {api_key}",
             "Content-Type": "application/json",
         },
     )
