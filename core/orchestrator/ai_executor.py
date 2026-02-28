@@ -587,11 +587,11 @@ def _call_claude_cli(messages: list[dict[str, str]], model: str) -> dict[str, An
             input=user_content,
             capture_output=True,
             text=True,
-            timeout=600,
+            timeout=1200,
             env=env,
         )
     except subprocess.TimeoutExpired as exc:
-        raise RuntimeError("claude CLI subprocess timed out (600s)") from exc
+        raise RuntimeError("claude CLI subprocess timed out (1200s)") from exc
 
     if result.returncode != 0:
         raise RuntimeError(
