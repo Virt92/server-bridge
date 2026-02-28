@@ -38,12 +38,21 @@ ROLE_BRIEF = {
         "❌ НЕ ТВОЯ ЗОНА: npm run build, npm run dev, npm start, pm2, next build — это задача @DevOps\n"
         "❌ НИКОГДА не запускай долгосрочные процессы (dev-сервер, watch-процессы)\n"
         "❌ НИКОГДА не запускай npm install без явного указания в задаче\n"
+        "❌ НИКОГДА не используй nano, vim, vi — они интерактивные и не работают в неинтерактивном шелле\n"
         "Твоя задача завершена когда исходный код изменён и прошёл type-check. Сборку делает @DevOps.\n"
+        "\n"
+        "КАК ПИСАТЬ ФАЙЛЫ — ОБЯЗАТЕЛЬНО используй heredoc с ОДИНАРНЫМИ кавычками:\n"
+        "  cat > /полный/путь/файл.tsx << 'ENDOFFILE'\n"
+        "  [содержимое файла — JSX, TypeScript, CSS — без экранирования]\n"
+        "  ENDOFFILE\n"
+        "❌ НЕ используй echo '...' — bash ломается на {, }, $, ` в JSX/TS коде\n"
+        "❌ НЕ используй printf — те же проблемы\n"
+        "✅ ТОЛЬКО cat heredoc с << 'ENDOFFILE' (одинарные кавычки предотвращают подстановку переменных)\n"
         "\n"
         "РАБОЧИЙ ПРОЦЕСС (обязательно):\n"
         "1. PLAN — изучи структуру (ls, cat package.json, cat существующих файлов), реши что менять\n"
-        "2. IMPLEMENT — пиши/правь файлы итерационно, файл за файлом\n"
-        "3. VERIFY каждого файла — сразу после записи прочитай файл и убедись что записалось верно\n"
+        "2. IMPLEMENT — пиши/правь файлы итерационно, файл за файлом через cat heredoc\n"
+        "3. VERIFY каждого файла — сразу после записи прочитай файл (cat) и убедись что записалось верно\n"
         "4. TYPE CHECK — npx tsc --noEmit 2>&1 | head -30 (если TypeScript проект)\n"
         "5. SELF-REVIEW — перечитай изменения, убедись что нет синтаксических ошибок и дублей\n"
         "\n"
@@ -55,7 +64,15 @@ ROLE_BRIEF = {
         "Специализация: REST/GraphQL API, БД, бизнес-логика, аутентификация, производительность, надёжность.\n"
         "Discovery-приоритеты: найди существующие роуты/эндпоинты, схему БД, middleware, конфиги окружения.\n"
         "Не дублируй существующую логику. Проверяй схему перед миграциями. Проверяй API через curl после правок.\n"
-        "Root-cause thinking: проблема скорее в коде, чем в тестах."
+        "Root-cause thinking: проблема скорее в коде, чем в тестах.\n"
+        "\n"
+        "❌ НИКОГДА не используй nano, vim, vi — они интерактивные и не работают\n"
+        "КАК ПИСАТЬ ФАЙЛЫ — используй heredoc с одинарными кавычками:\n"
+        "  cat > /полный/путь/файл.ts << 'ENDOFFILE'\n"
+        "  [код TypeScript/JavaScript]\n"
+        "  ENDOFFILE\n"
+        "Для установки пакета sqlite3: npm install sqlite3 --save (если нет в package.json)\n"
+        "После записи файла ВСЕГДА проверяй: cat /путь/к/файлу и убедись что содержимое верное."
     ),
     "devops": (
         "Ты senior DevOps/SRE engineer. Сервер: 91.99.201.99.\n"
@@ -149,6 +166,8 @@ ALWAYS_DANGEROUS_PATTERNS = [
     r"git\s+checkout\s+--",
     r"curl.+\|\s*(sh|bash)",
     r"wget.+\|\s*(sh|bash)",
+    # Interactive editors — not available in non-interactive shells
+    r"(^|\s)(nano|vim|vi|emacs|pico|gedit|code)(\s|$)",
 ]
 
 PRIVILEGED_PATTERNS = [
@@ -276,6 +295,13 @@ def _looks_like_discovery_command(cmd: str) -> bool:
     lowered = str(cmd or "").strip().lower()
     if not lowered:
         return False
+
+    # Strip safe fallback suffixes: || echo '...' || true
+    # These are read-only fallbacks and should not disqualify the primary command
+    stripped_fallbacks = re.sub(r'\s*\|\|\s*(echo\b.*|true|:|false)$', '', lowered).strip()
+    # If stripping fallbacks removed the operator, check the remainder
+    if stripped_fallbacks != lowered and "||" not in stripped_fallbacks:
+        lowered = stripped_fallbacks
 
     # Allow \; (find -exec terminator) but block real command chaining (; && ||)
     chaining_check = lowered.replace("\\;", "")
