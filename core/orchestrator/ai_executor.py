@@ -318,6 +318,60 @@ def _looks_like_discovery_command(cmd: str) -> bool:
     return lowered.startswith(DISCOVERY_PREFIXES) or stripped.startswith(DISCOVERY_PREFIXES)
 
 
+def _extract_heredoc_marker(cmd: str) -> str:
+    text = str(cmd or "").strip()
+    if not text:
+        return ""
+
+    patterns = (
+        r"<<\s*'([^']+)'\s*$",
+        r'<<\s*"([^"]+)"\s*$',
+        r"<<\s*([A-Za-z_][A-Za-z0-9_]*)\s*$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1).strip()
+    return ""
+
+
+def _normalize_command_sequence(commands: list[str]) -> list[str]:
+    """Join split heredoc payload lines into one executable shell command."""
+    normalized: list[str] = []
+    i = 0
+    total = len(commands)
+
+    while i < total:
+        cmd = commands[i]
+        marker = _extract_heredoc_marker(cmd)
+        if not marker:
+            normalized.append(cmd)
+            i += 1
+            continue
+
+        collected = [cmd]
+        j = i + 1
+        found_marker = False
+        while j < total:
+            line = commands[j]
+            collected.append(line)
+            if str(line).strip() == marker:
+                found_marker = True
+                break
+            j += 1
+
+        if found_marker:
+            normalized.append("\n".join(collected))
+            i = j + 1
+            continue
+
+        # Broken heredoc block: keep original commands to preserve debuggability.
+        normalized.extend(collected)
+        i = j
+
+    return normalized
+
+
 def _parse_json_maybe(text: str) -> dict[str, Any]:
     cleaned = text.strip()
     if cleaned.startswith("```"):
@@ -771,6 +825,15 @@ def run_ai_task(role: str, task: dict[str, Any], logs_dir: Path) -> tuple[str, s
         if not isinstance(raw_commands, list):
             raw_commands = []
         commands = [str(c).strip() for c in raw_commands if str(c).strip()]
+        commands = _normalize_command_sequence(commands)
+
+        # Some providers/models may omit the "decision" field while still returning
+        # actionable commands. Coerce this shape into "run" to keep execution alive.
+        if not action:
+            if commands:
+                action = "run"
+            elif note:
+                action = "blocked"
 
         if action == "done":
             final_status = "done"
@@ -797,17 +860,22 @@ def run_ai_task(role: str, task: dict[str, Any], logs_dir: Path) -> tuple[str, s
             break
 
         if step == 1:
-            non_discovery = [cmd for cmd in commands[:MAX_COMMANDS_PER_STEP] if not _looks_like_discovery_command(cmd)]
+            step_commands = commands[:MAX_COMMANDS_PER_STEP]
+            discovery_commands = [cmd for cmd in step_commands if _looks_like_discovery_command(cmd)]
+            non_discovery = [cmd for cmd in step_commands if not _looks_like_discovery_command(cmd)]
             if non_discovery:
-                final_status = "blocked"
-                final_note = f"Шаг 1 должен содержать только read-only команды (discovery). Нарушение: {non_discovery[0]!r}"
                 step_payload["guard"] = {
                     "rule": "first_step_discovery_only",
-                    "blocked": True,
+                    "blocked": not discovery_commands,
                     "offending_commands": non_discovery,
+                    "kept_commands": discovery_commands,
                 }
-                transcript["steps"].append(step_payload)
-                break
+                if not discovery_commands:
+                    final_status = "blocked"
+                    final_note = f"Шаг 1 должен содержать только read-only команды (discovery). Нарушение: {non_discovery[0]!r}"
+                    transcript["steps"].append(step_payload)
+                    break
+                commands = discovery_commands
 
         blocked_by_guard = False
         for cmd in commands[:MAX_COMMANDS_PER_STEP]:
