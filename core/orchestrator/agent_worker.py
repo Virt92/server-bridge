@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ai_executor import run_ai_task
+from ai_executor import run_ai_task, save_task_lesson
 from common import DATA_DIR, DEVELOPERS_DIR, append_memory, ensure_runtime_layout, read_task, write_task
 
 POLL_SECONDS = 3
@@ -346,6 +346,9 @@ def process_one(role: str) -> None:
             write_task(task_file, task)
 
             append_memory(memory_path, status, note)
+            # Save distilled lesson for future tasks (lightweight experience cache)
+            if mode == "ai":
+                save_task_lesson(role, title, ai_status, ai_note)
             destination_dir = done_dir if task["status"] == "done" else failed_dir
             shutil.move(str(task_file), destination_dir / task_file.name)
         except KeyboardInterrupt:

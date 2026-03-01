@@ -669,26 +669,74 @@ def _call_claude_cli(messages: list[dict[str, str]], model: str) -> dict[str, An
 
     return _parse_json_maybe(raw_stdout)
 def _load_role_profile(role: str) -> str:
+    """Load profile.md + lessons.md for the role, combined and capped."""
     role_name = (role or "").strip().lower()
     if not role_name:
         return ""
 
+    parts: list[str] = []
+
+    # Load profile.md (stable rules, max 2500 chars)
     profile_path = ROLE_PROFILE_ROOT / role_name / "profile.md"
-    if not profile_path.exists():
+    if profile_path.exists():
+        try:
+            text = profile_path.read_text(encoding="utf-8").strip()
+            if text:
+                cap = 2500
+                parts.append(text[:cap] + ("\n...[profile truncated]" if len(text) > cap else ""))
+        except Exception:
+            pass
+
+    # Load lessons.md (distilled task experience, max 1500 chars, LAST entries preferred)
+    lessons_path = ROLE_PROFILE_ROOT / role_name / "lessons.md"
+    if lessons_path.exists():
+        try:
+            lessons = lessons_path.read_text(encoding="utf-8").strip()
+            if lessons:
+                cap = 1500
+                # Keep the LAST cap chars (most recent lessons are most relevant)
+                if len(lessons) > cap:
+                    lessons = "...[older lessons omitted]\n" + lessons[-cap:]
+                parts.append(f"\n## Опыт из прошлых задач\n{lessons}")
+        except Exception:
+            pass
+
+    combined = "\n".join(parts).strip()
+    if not combined:
         return ""
+
+    if len(combined) > MAX_ROLE_PROFILE_CHARS:
+        return combined[:MAX_ROLE_PROFILE_CHARS] + "\n...[truncated]"
+    return combined
+
+
+def save_task_lesson(role: str, title: str, ai_status: str, ai_note: str) -> None:
+    """Append a distilled lesson from a completed task to lessons.md.
+
+    Keeps the file lean (max ~3000 chars) by trimming oldest entries.
+    """
+    role_name = (role or "").strip().lower()
+    if not role_name or not ai_note:
+        return
+
+    lessons_path = ROLE_PROFILE_ROOT / role_name / "lessons.md"
+    lessons_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Distil: keep first 300 chars of ai_note (the agent's own summary)
+    note_snippet = ai_note.strip().replace("\n", " ")[:300]
+    status_tag = "✅" if ai_status == "done" else "⚠️"
+    timestamp = time.strftime("%Y-%m-%d")
+    entry = f"\n{status_tag} [{timestamp}] {title}\n→ {note_snippet}\n"
 
     try:
-        text = profile_path.read_text(encoding="utf-8").strip()
+        existing = lessons_path.read_text(encoding="utf-8") if lessons_path.exists() else ""
+        combined = existing + entry
+        # Trim if file grows too large (keep last 3000 chars)
+        if len(combined) > 3500:
+            combined = "...[older entries trimmed]\n" + combined[-3000:]
+        lessons_path.write_text(combined, encoding="utf-8")
     except Exception:
-        return ""
-
-    if not text:
-        return ""
-
-    if len(text) > MAX_ROLE_PROFILE_CHARS:
-        return f"{text[:MAX_ROLE_PROFILE_CHARS]}\n...[profile truncated]..."
-
-    return text
+        pass
 
 
 def _extract_change_request(task: dict[str, Any]) -> dict[str, Any]:
