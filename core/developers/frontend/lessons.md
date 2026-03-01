@@ -19,3 +19,12 @@
 
 ⚠️ [2026-03-01] Верстка лендинга 3d-figures-landing
 → Ошибка запроса к модели: claude CLI exited 1: {"type":"result","subtype":"success","is_error":true,"duration_ms":266,"duration_api_ms":0,"num_turns":1,"result":"You're out of extra usage · resets 11pm (UTC)","stop_reason":"stop_sequence","session
+
+✅ [2026-03-01] Верстка лендинга 3d-figures-landing
+→ Верстка лендинга 3d-figures-landing завершена успешно.  **Изменённые файлы:** - `pages/index.tsx` — полный лендинг (513 строк): navbar, hero, каталог (6 карточек), преимущества (3 блока), форма заказа, footer - `styles/globals.css` — добавлен Google Fonts import (Poppins + Roboto), сброс стилей  **С
+
+⚠️ [2026-03-01] Исправление ошибок в верстке лендинга 3d-figures-landing
+→ Ошибка запроса к модели: No valid JSON object found: line 1 column 1 (char 0)
+
+✅ [2026-03-01] Исправление ошибок в верстке
+→ Задача завершена успешно. Исправлены все найденные проблемы:  **Изменённые файлы:** 1. `pages/api/order.ts` — создан новый API endpoint (POST /api/order) с валидацией полей name/phone, генерацией orderId, логированием заказа 2. `pages/index.tsx` — исправлен handleSubmit: заменён простой `setSubmitte

@@ -38,6 +38,11 @@ ENDOFFILE
 2. npx tsc --noEmit прошёл без ошибок (или с допустимыми warnings)
 3. В note перечислены изменённые файлы + какие изображения сгенерированы
 
+## КРИТИЧНО: НЕ говори decision=done если есть TypeScript ошибки
+Если npx tsc --noEmit выдаёт ошибки — ИСПРАВЬ их сначала. Только 0 ошибок = можно сказать done.
+Допустимы ТОЛЬКО warnings типа "Cannot find module 'ws'" (внешние пакеты без типов).
+Ошибки типа "Type X is not assignable to Y", "Property X does not exist" — нужно исправить.
+
 ## Типичный порядок работы для лендинга
 1. cat DESIGN.md → понять требования и цветовую схему
 2. ls pages/ styles/ public/ → увидеть структуру

@@ -29,6 +29,14 @@ curl -s -X POST http://127.0.0.1:PORT/api/endpoint \
 - PASS (decision=done): HTTP 200, страница содержит контент, процесс online
 - FAIL (decision=blocked): HTTP 4xx/5xx, процесс crashed, страница пустая, форма не отвечает
 
+## Формат note при FAIL — ОБЯЗАТЕЛЬНО конкретно
+При decision=blocked note ДОЛЖЕН содержать:
+- HTTP код: "HTTP 500 на localhost:PORT"
+- Конкретный элемент которого нет: "отсутствует <form>, <h1>, секция hero"
+- Текст ошибки из curl: "Error: Cannot find module 'xyz'"
+- Что именно не работает: "кнопка 'Заказать' не отправляет форму (нет action)"
+НЕ писать "ошибки есть" — писать ЧТО ИМЕННО сломано и В КАКОМ ФАЙЛЕ если видно.
+
 ## Запреты
 - НЕ использовать nano, vim, vi
 - НЕ запускать npm run build/dev/start
@@ -36,3 +44,14 @@ curl -s -X POST http://127.0.0.1:PORT/api/endpoint \
 
 ## Задача завершена когда
 В note: URL проверки, HTTP статус, что нашёл (pass/fail по каждому пункту), итоговый вердикт
+
+## ОБЯЗАТЕЛЬНО: уведомление в чат после завершения теста
+После финального шага (decision=done) ВСЕГДА выполняй команду отправки в чат:
+```bash
+# PASS — сообщи команде:
+node -e "const ws=new (require('ws'))('ws://127.0.0.1:4000');ws.on('open',()=>{ws.send(JSON.stringify({type:'chat',user:'QA',message:'✅ QA PASS: HTTP 200 на localhost:PORT и 91.99.201.99:PORT, PM2 online, контент присутствует. @DevOps — тест пройден, сайт работает на http://91.99.201.99:PORT. Рекомендую к релизу.'}));setTimeout(()=>{ws.close();process.exit(0)},500)})"
+
+# FAIL — сообщи команде:
+node -e "const ws=new (require('ws'))('ws://127.0.0.1:4000');ws.on('open',()=>{ws.send(JSON.stringify({type:'chat',user:'QA',message:'❌ QA FAIL: [описание ошибки]. @DevOps @EPM — нужно исправить: [шаги]'}));setTimeout(()=>{ws.close();process.exit(0)},500)})"
+```
+Замени PORT на реальный номер порта. НЕ пропускай этот шаг — без него команда не узнает о результате теста.

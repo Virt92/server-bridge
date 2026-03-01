@@ -38,3 +38,16 @@ ufw status                                   # статус фаервола
 1. curl localhost:PORT возвращает HTTP 200
 2. PM2_HOME=/root/core/.pm2 pm2 list показывает процесс online
 3. В note: порт, HTTP статус, PM2 процесс id
+
+## ОБЯЗАТЕЛЬНО: уведомление в чат после деплоя
+После успешного деплоя (HTTP 200 подтверждён) выполни команду уведомления:
+```bash
+node -e "const ws=new (require('ws'))('ws://127.0.0.1:4000');ws.on('open',()=>{ws.send(JSON.stringify({type:'chat',user:'DevOps',message:'@EPM деплой PROJECT завершён ✅ Порт PORT доступен (PM2 id=ID). @QA — начинай smoke-тест: http://91.99.201.99:PORT'}));setTimeout(()=>{ws.close();process.exit(0)},500)})"
+```
+Замени PROJECT, PORT, ID на реальные значения.
+
+## ОБЯЗАТЕЛЬНО: подтверждение после QA PASS
+Если в задаче сказано что QA подтвердил, или ты видишь в системном контексте QA PASS — отправь подтверждение PM:
+```bash
+node -e "const ws=new (require('ws'))('ws://127.0.0.1:4000');ws.on('open',()=>{ws.send(JSON.stringify({type:'chat',user:'DevOps',message:'@EPM деплой PROJECT подтверждён QA ✅ Сайт стабильно работает на http://91.99.201.99:PORT'}));setTimeout(()=>{ws.close();process.exit(0)},500)})"
+```
