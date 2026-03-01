@@ -437,13 +437,24 @@ def _parse_json_maybe(text: str) -> dict[str, Any]:
     if cleaned.startswith("```"):
         cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
         cleaned = re.sub(r"\s*```$", "", cleaned)
+    # Try raw_decode first — handles "Extra data" by consuming only the first JSON object
+    decoder = json.JSONDecoder()
     try:
-        return json.loads(cleaned)
+        obj, _ = decoder.raw_decode(cleaned)
+        if isinstance(obj, dict):
+            return obj
     except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
-        if not match:
-            raise
-        return json.loads(match.group(0))
+        pass
+    # Fallback: find the first {...} block
+    match = re.search(r"\{", cleaned)
+    if match:
+        try:
+            obj, _ = decoder.raw_decode(cleaned[match.start():])
+            if isinstance(obj, dict):
+                return obj
+        except json.JSONDecodeError:
+            pass
+    raise json.JSONDecodeError("No valid JSON object found", cleaned, 0)
 
 
 def _resolve_openai_auth(base_url: str, api_key: str) -> tuple[str, str]:
@@ -577,7 +588,9 @@ def _call_claude_cli(messages: list[dict[str, str]], model: str) -> dict[str, An
     env = {k: v for k, v in os.environ.items() if k not in _STRIP_ENV}
 
     model_arg = model if model else "sonnet"
-    cmd = [CLAUDE_CLI_PATH, "-p", "--model", model_arg]
+    cmd = [CLAUDE_CLI_PATH, "-p", "--model", model_arg,
+           "--add-dir", "/root/projects",
+           "--add-dir", "/root/core"]
     if system_content:
         cmd += ["--system-prompt", system_content]
 
@@ -589,6 +602,7 @@ def _call_claude_cli(messages: list[dict[str, str]], model: str) -> dict[str, An
             text=True,
             timeout=1200,
             env=env,
+            cwd="/root",
         )
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError("claude CLI subprocess timed out (1200s)") from exc

@@ -1,7 +1,2 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-# Keep orchestrator processes isolated from global PM2 apps.
-export PM2_HOME="${PM2_HOME:-/root/core/.pm2}"
-
-exec pm2 "$@"
+#!/bin/bash
+PM2_HOME=/root/core/.pm2 pm2 "$@"
