@@ -607,8 +607,13 @@ def _call_claude_cli(messages: list[dict[str, str]], model: str) -> dict[str, An
     env = {k: v for k, v in os.environ.items() if k not in _STRIP_ENV}
 
     model_arg = model if model else "sonnet"
+    # --tools "" disables CLI's own tool execution so the CLI just generates
+    # a text response. Tool execution (bash commands) is handled by ai_executor.py
+    # itself via _run_command(). Without this flag the CLI tries to run tools
+    # and hangs waiting for permission prompts with no terminal attached.
     cmd = [CLAUDE_CLI_PATH, "-p", "--output-format", "json",
            "--model", model_arg,
+           "--tools", "",
            "--add-dir", "/root/projects",
            "--add-dir", "/root/core"]
     if system_content:
