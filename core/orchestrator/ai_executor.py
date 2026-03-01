@@ -499,7 +499,13 @@ def _call_openai(messages: list[dict[str, str]], model: str, base_url: str, api_
     for attempt in range(4):
         try:
             with urllib.request.urlopen(request, timeout=90) as response:
-                data = json.loads(response.read().decode("utf-8"))
+                raw_body = response.read().decode("utf-8")
+                try:
+                    data = json.loads(raw_body)
+                except json.JSONDecodeError as exc:
+                    raise RuntimeError(
+                        f"OpenAI returned non-JSON response: {raw_body[:300]}"
+                    ) from exc
             last_exc = None
             break
         except urllib.error.HTTPError as exc:
@@ -515,7 +521,10 @@ def _call_openai(messages: list[dict[str, str]], model: str, base_url: str, api_
     if last_exc is not None:
         raise RuntimeError(f"OpenAI rate limit after retries: {last_exc}") from last_exc
 
-    content = data["choices"][0]["message"]["content"]
+    try:
+        content = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError(f"Unexpected OpenAI response structure: {str(data)[:300]}") from exc
     return _parse_json_maybe(content)
 
 
@@ -554,14 +563,23 @@ def _call_anthropic(messages: list[dict[str, str]], model: str, base_url: str, a
     )
     try:
         with urllib.request.urlopen(request, timeout=90) as response:
-            data = json.loads(response.read().decode("utf-8"))
+            raw_body = response.read().decode("utf-8")
+            try:
+                data = json.loads(raw_body)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(
+                    f"Anthropic returned non-JSON response: {raw_body[:300]}"
+                ) from exc
     except urllib.error.HTTPError as exc:
         error_payload = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"Anthropic HTTP {exc.code}: {error_payload}") from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f"Anthropic connection error: {exc}") from exc
 
-    content = data["content"][0]["text"]
+    try:
+        content = data["content"][0]["text"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError(f"Unexpected Anthropic response structure: {str(data)[:300]}") from exc
     return _parse_json_maybe(content)
 
 
@@ -569,7 +587,11 @@ def _call_claude_cli(messages: list[dict[str, str]], model: str) -> dict[str, An
     """Invoke the local claude CLI subprocess as an AI provider.
 
     Removes CLAUDECODE from the child environment to avoid the
-    "nested session" guard that the CLI enforces.
+    nested session guard that the CLI enforces.
+
+    Uses --output-format json so the CLI wraps the response in a structured
+    JSON envelope: type/subtype/result.
+    This prevents Extra-data parse errors from trailing text in text output mode.
     """
     system_content = ""
     user_content = ""
@@ -581,14 +603,12 @@ def _call_claude_cli(messages: list[dict[str, str]], model: str) -> dict[str, An
         elif role == "user":
             user_content = content
 
-    # Strip Claude Code session markers and any Anthropic API key from the parent
-    # environment. The CLI must use its own stored OAuth credentials (~/.claude/),
-    # not the (potentially invalid) ANTHROPIC_API_KEY set in .agent.env.
     _STRIP_ENV = {"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "ANTHROPIC_API_KEY"}
     env = {k: v for k, v in os.environ.items() if k not in _STRIP_ENV}
 
     model_arg = model if model else "sonnet"
-    cmd = [CLAUDE_CLI_PATH, "-p", "--model", model_arg,
+    cmd = [CLAUDE_CLI_PATH, "-p", "--output-format", "json",
+           "--model", model_arg,
            "--add-dir", "/root/projects",
            "--add-dir", "/root/core"]
     if system_content:
@@ -608,13 +628,41 @@ def _call_claude_cli(messages: list[dict[str, str]], model: str) -> dict[str, An
         raise RuntimeError("claude CLI subprocess timed out (1200s)") from exc
 
     if result.returncode != 0:
+        stderr_snippet = result.stderr[:600].strip() if result.stderr else ""
+        stdout_snippet = result.stdout[:200].strip() if result.stdout else ""
+        no_out = "(no output)"
         raise RuntimeError(
-            f"claude CLI exited {result.returncode}: {result.stderr[:400]}"
+            f"claude CLI exited {result.returncode}: "
+            f"{stderr_snippet or stdout_snippet or no_out}"
         )
 
-    return _parse_json_maybe(result.stdout)
+    raw_stdout = result.stdout.strip()
+    if not raw_stdout:
+        stderr_snippet = result.stderr[:400].strip() if result.stderr else "(no stderr)"
+        raise RuntimeError(
+            f"claude CLI returned empty stdout (returncode=0). stderr: {stderr_snippet}"
+        )
 
+    # --output-format json envelope: {"type": "result", "subtype": "success", "result": "..."}
+    # Extract inner result text, then parse it as the agent decision JSON.
+    envelope = None
+    try:
+        envelope = json.loads(raw_stdout)
+    except ValueError:
+        pass
 
+    if isinstance(envelope, dict):
+        subtype = str(envelope.get("subtype") or "").strip()
+        if subtype == "error":
+            error_msg = str(envelope.get("error") or envelope.get("result") or raw_stdout)[:400]
+            raise RuntimeError(f"claude CLI returned error: {error_msg}")
+        inner_text = envelope.get("result")
+        if inner_text is not None:
+            return _parse_json_maybe(str(inner_text))
+        if "decision" in envelope:
+            return envelope
+
+    return _parse_json_maybe(raw_stdout)
 def _load_role_profile(role: str) -> str:
     role_name = (role or "").strip().lower()
     if not role_name:

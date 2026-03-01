@@ -348,6 +348,20 @@ def process_one(role: str) -> None:
             append_memory(memory_path, status, note)
             destination_dir = done_dir if task["status"] == "done" else failed_dir
             shutil.move(str(task_file), destination_dir / task_file.name)
+        except KeyboardInterrupt:
+            # Worker interrupted by PM2 SIGINT during task processing.
+            # Save task as failed so it is not retried in an infinite loop on restart.
+            try:
+                task["status"] = "failed"
+                task["completed_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                task["ai_note"] = task.get("ai_note", "Прервано сигналом завершения процесса")
+                write_task(task_file, task)
+                if task_file.exists():
+                    shutil.move(str(task_file), failed_dir / task_file.name)
+                append_memory(memory_path, "error", f"Задача '{title}' прервана (SIGINT)")
+            except Exception:
+                pass
+            raise
         except Exception as exc:
             append_memory(memory_path, "error", f"Ошибка обработки '{title}': {exc}")
             if task_file.exists():
